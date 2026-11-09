@@ -1,10 +1,15 @@
 import { google } from "@ai-sdk/google";
 import { generateText, Output, tool, stepCountIs } from "ai";
 import { z } from "zod";
+import { db } from "@/db";
+import {
+  messages as messagesTable,
+  sessions as sessionsTable,
+} from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export const maxDuration = 30;
 
-// 1. Zod schema for structured SWOT & market research reports
 const MarketReportSchema = z.object({
   summary: z.string().describe("Executive summary of the market or company"),
   keyTrends: z
@@ -21,13 +26,27 @@ const MarketReportSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const { messages, mode = "chat" } = await req.json();
+    const { messages, mode = "chat", sessionId } = await req.json();
 
-    // Arrays to collect verified sources and tool actions for the UI
+    const latestUserMsg = messages[messages.length - 1];
+    if (sessionId && latestUserMsg) {
+      await db.insert(messagesTable).values({
+        sessionId,
+        role: "user",
+        content: latestUserMsg.content,
+      });
+
+      if (messages.length === 1) {
+        await db
+          .update(sessionsTable)
+          .set({ title: latestUserMsg.content.slice(0, 35) })
+          .where(eq(sessionsTable.id, sessionId));
+      }
+    }
+
     const collectedSources: { title: string; url: string }[] = [];
     const toolsUsed: string[] = [];
 
-    // Multi-tool definitions (Web Search + URL Content Extraction)
     const tools = {
       searchInternet: tool({
         description:
@@ -92,7 +111,6 @@ export async function POST(req: Request) {
       }),
     };
 
-    // 4. Mode A: Structured SWOT & Market Report
     if (mode === "report") {
       const result = await generateText({
         model: google("gemini-3.5-flash-lite"),
@@ -104,6 +122,17 @@ export async function POST(req: Request) {
         output: Output.object({ schema: MarketReportSchema }),
       });
 
+      if (sessionId) {
+        await db.insert(messagesTable).values({
+          sessionId,
+          role: "assistant",
+          content: "",
+          report: result.output,
+          sources: collectedSources,
+          toolsUsed,
+        });
+      }
+
       return Response.json({
         mode: "report",
         report: result.output,
@@ -112,7 +141,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Mode B: Conversational Market Research Assistant
     const result = await generateText({
       model: google("gemini-3.5-flash-lite"),
       maxRetries: 1,
@@ -122,9 +150,21 @@ export async function POST(req: Request) {
       tools,
     });
 
+    const replyText = result.text || "No response generated.";
+
+    if (sessionId) {
+      await db.insert(messagesTable).values({
+        sessionId,
+        role: "assistant",
+        content: replyText,
+        sources: collectedSources,
+        toolsUsed,
+      });
+    }
+
     return Response.json({
       mode: "chat",
-      reply: result.text || "No response generated.",
+      reply: replyText,
       sources: collectedSources,
       toolsUsed,
     });

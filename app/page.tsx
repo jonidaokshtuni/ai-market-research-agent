@@ -19,9 +19,9 @@ type MarketReport = {
 type Message = {
   role: "user" | "assistant";
   content: string;
-  report?: MarketReport;
-  sources?: Source[];
-  toolsUsed?: string[];
+  report?: MarketReport | null;
+  sources?: Source[] | null;
+  toolsUsed?: string[] | null;
 };
 
 type Session = {
@@ -36,34 +36,65 @@ export default function MarketResearchDashboard() {
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<"chat" | "report">("chat");
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem("market_agent_sessions");
-    if (saved) {
-      const parsed: Session[] = JSON.parse(saved);
-      if (parsed.length > 0) {
-        setSessions(parsed);
-        setActiveId(parsed[0].id);
-        return;
+    const loadSessions = async () => {
+      try {
+        const res = await fetch("/api/sessions");
+        const data = await res.json();
+
+        if (Array.isArray(data.sessions) && data.sessions.length > 0) {
+          setSessions(data.sessions);
+          setActiveId(data.sessions[0].id);
+        } else {
+          await createNewSession();
+        }
+      } catch (err) {
+        console.error("Failed to load sessions from DB:", err);
+      } finally {
+        setIsInitializing(false);
       }
-    }
-    createNewSession();
+    };
+
+    loadSessions();
   }, []);
 
-  useEffect(() => {
-    if (sessions.length > 0) {
-      localStorage.setItem("market_agent_sessions", JSON.stringify(sessions));
-    }
-  }, [sessions]);
+  const createNewSession = async () => {
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New Research" }),
+      });
+      const data = await res.json();
 
-  const createNewSession = () => {
-    const newSession: Session = {
-      id: crypto.randomUUID(),
-      title: "New Research",
-      messages: [],
-    };
-    setSessions((prev) => [newSession, ...prev]);
-    setActiveId(newSession.id);
+      if (data.session) {
+        setSessions((prev) => [data.session, ...prev]);
+        setActiveId(data.session.id);
+      }
+    } catch (err) {
+      console.error("Failed to create session:", err);
+    }
+  };
+
+  const deleteSession = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    try {
+      await fetch(`/api/sessions?id=${id}`, { method: "DELETE" });
+      const remaining = sessions.filter((s) => s.id !== id);
+      setSessions(remaining);
+
+      if (activeId === id) {
+        if (remaining.length > 0) {
+          setActiveId(remaining[0].id);
+        } else {
+          await createNewSession();
+        }
+      }
+    } catch (err) {
+      console.error("Failed to delete session:", err);
+    }
   };
 
   const activeSession = sessions.find((s) => s.id === activeId);
@@ -85,12 +116,11 @@ export default function MarketResearchDashboard() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !activeId) return;
 
     const userMessage: Message = { role: "user", content: input };
     const updatedMessages = [...messages, userMessage];
-    const titleUpdate =
-      messages.length === 0 ? input.slice(0, 32) + "..." : undefined;
+    const titleUpdate = messages.length === 0 ? input.slice(0, 35) : undefined;
 
     updateActiveMessages(updatedMessages, titleUpdate);
     setInput("");
@@ -105,7 +135,11 @@ export default function MarketResearchDashboard() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, mode }),
+        body: JSON.stringify({
+          messages: apiMessages,
+          mode,
+          sessionId: activeId,
+        }),
       });
 
       const data = await res.json();
@@ -144,22 +178,35 @@ export default function MarketResearchDashboard() {
         </button>
 
         <div className="text-xs uppercase tracking-wider text-gray-400 mb-2">
-          Saved Sessions
+          Saved Sessions (PostgreSQL)
         </div>
         <div className="flex-1 overflow-y-auto space-y-1">
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveId(s.id)}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm truncate ${
-                s.id === activeId
-                  ? "bg-gray-700 font-medium"
-                  : "hover:bg-gray-800 text-gray-300"
-              }`}
-            >
-              {s.title}
-            </button>
-          ))}
+          {isInitializing ? (
+            <div className="text-xs text-gray-400 px-2 py-2">
+              Loading database...
+            </div>
+          ) : (
+            sessions.map((s) => (
+              <div
+                key={s.id}
+                onClick={() => setActiveId(s.id)}
+                className={`group flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer ${
+                  s.id === activeId
+                    ? "bg-gray-700 font-medium"
+                    : "hover:bg-gray-800 text-gray-300"
+                }`}
+              >
+                <span className="truncate pr-2">{s.title}</span>
+                <button
+                  onClick={(e) => deleteSession(e, s.id)}
+                  title="Delete session"
+                  className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 text-xs px-1"
+                >
+                  ×
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </aside>
 
@@ -168,7 +215,7 @@ export default function MarketResearchDashboard() {
           <div>
             <h1 className="text-xl font-bold">AI Market Research Agent</h1>
             <p className="text-xs text-gray-500">
-              Powered by Gemini 3.5 Flash-Lite + Tavily Web Intelligence
+              Gemini 3.5 Flash-Lite + Tavily Web Intelligence + Neon PostgreSQL
             </p>
           </div>
 
@@ -199,7 +246,7 @@ export default function MarketResearchDashboard() {
         </header>
 
         <div className="flex-1 overflow-y-auto space-y-6 mb-4 pr-2">
-          {messages.length === 0 && (
+          {messages.length === 0 && !isInitializing && (
             <div className="text-center text-gray-400 mt-20 space-y-2">
               <p className="font-medium text-gray-600">
                 Try asking the agent to research a company or URL:
@@ -350,11 +397,11 @@ export default function MarketResearchDashboard() {
                 : "Ask a market research question or paste a competitor URL..."
             }
             className="flex-1 border border-gray-300 rounded-xl px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={isLoading}
+            disabled={isLoading || isInitializing}
           />
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || isInitializing}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium disabled:opacity-50"
           >
             {isLoading

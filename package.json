@@ -11,7 +11,9 @@
   "dependencies": {
     "@ai-sdk/google": "^4.0.114",
     "@ai-sdk/react": "^4.0.170",
+    "@neondatabase/serverless": "^1.2.0",
     "ai": "^7.0.166",
+    "drizzle-orm": "^0.45.4",
     "lucide-react": "^1.70.0",
     "next": "16.4.5",
     "react": "19.3.0",
@@ -22,6 +24,8 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^18.0.10",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.5",
     "tailwindcss": "^4",
