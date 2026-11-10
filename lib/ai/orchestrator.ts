@@ -1,26 +1,9 @@
-import { generateText, Output, tool, stepCountIs } from "ai";
-import { z } from "zod";
+import { runMarketResearcher } from "./agents/market-researcher";
+import { runReportGenerator } from "./agents/report-generator";
 
-import { researchModel, AI_CONFIG } from "./models";
-import { MARKET_RESEARCH_SYSTEM_PROMPT, SWOT_REPORT_PROMPT } from "./prompts";
+import type { GeneratedMarketReport } from "./agents/report-generator";
 
-import { searchInternet } from "@/lib/tools/search";
-import { extractWebsite } from "@/lib/tools/extract";
-
-const MarketReportSchema = z.object({
-  summary: z.string(),
-  keyTrends: z.array(z.string()),
-  swot: z.object({
-    strengths: z.array(z.string()),
-    weaknesses: z.array(z.string()),
-    opportunities: z.array(z.string()),
-    threats: z.array(z.string()),
-  }),
-  recommendation: z.string(),
-});
-
-export type MarketReport = z.infer<typeof MarketReportSchema>;
-
+export type MarketReport = GeneratedMarketReport;
 export type ResearchSource = {
   title: string;
   url: string;
@@ -37,104 +20,97 @@ export async function runResearchAgent({
   messages,
   mode,
 }: {
-  messages: Array<{
-    role: "user" | "assistant";
-    content: string;
-  }>;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
   mode: "chat" | "report";
 }): Promise<ResearchResult> {
-  const sources: ResearchSource[] = [];
-  const toolsUsed: string[] = [];
+  const conversation = messages
+    .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+    .join("\n\n");
 
-  const researchTools = {
-    searchInternet: tool({
-      description:
-        "Search the internet for current market information, competitors, company data and industry trends.",
-      inputSchema: z.object({
-        query: z.string().min(1).max(500),
-      }),
-      execute: async ({ query }) => {
-        const results = await searchInternet(query);
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "user");
 
-        toolsUsed.push("Web Search");
+  // Handle simple greetings without starting a research task.
+  const latestMessage = latestUserMessage?.content.trim() ?? "";
 
-        for (const result of results) {
-          if (!sources.some((source) => source.url === result.url)) {
-            sources.push({
-              title: result.title || result.url,
-              url: result.url,
-            });
-          }
-        }
+  if (
+    /^(hi|hello|hey|good morning|good afternoon|good evening|how are you)[!.?]*$/i.test(
+      latestMessage
+    )
+  ) {
+    return {
+      reply: "Hey! 👋 What market would you like to research today?",
+      report: null,
+      sources: [],
+      toolsUsed: [],
+    };
+  }
+  const researchTask = `
+Research the following conversation and respond to the latest user request.
 
-        return results;
-      },
-    }),
+CONVERSATION:
+${conversation}
 
-    extractWebsite: tool({
-      description:
-        "Extract website content from a public HTTP or HTTPS URL supplied for market research.",
-      inputSchema: z.object({
-        url: z.string().url(),
-      }),
-      execute: async ({ url }) => {
-        const results = await extractWebsite(url);
+LATEST USER REQUEST:
+${
+  latestUserMessage?.content ??
+  "Conduct market research based on the conversation."
+}
+`;
 
-        toolsUsed.push("Website Extraction");
+  // Run only one research specialist.
+  const research = await runMarketResearcher({
+    task: researchTask,
+  });
 
-        for (const result of results) {
-          if (!sources.some((source) => source.url === result.url)) {
-            sources.push({
-              title: result.url,
-              url: result.url,
-            });
-          }
-        }
+  const agent = research.result;
 
-        return results;
-      },
-    }),
-  };
-
-  const systemPrompt =
-    mode === "report"
-      ? `${MARKET_RESEARCH_SYSTEM_PROMPT}\n\n${SWOT_REPORT_PROMPT}`
-      : MARKET_RESEARCH_SYSTEM_PROMPT;
-
+  // Report mode uses the report generator.
   if (mode === "report") {
-    const result = await generateText({
-      model: researchModel,
-      system: systemPrompt,
-      messages,
-      tools: researchTools,
-      stopWhen: stepCountIs(AI_CONFIG.maxToolSteps),
-      maxRetries: AI_CONFIG.maxRetries,
-      output: Output.object({
-        schema: MarketReportSchema,
-      }),
+    const report = await runReportGenerator({
+      originalTask: researchTask,
+      agents: [agent],
     });
 
     return {
-      reply: result.output.summary,
-      report: result.output,
-      sources,
-      toolsUsed,
+      reply: report.summary,
+      report,
+      sources: research.sources,
+      toolsUsed: research.toolsUsed,
     };
   }
 
-  const result = await generateText({
-    model: researchModel,
-    system: systemPrompt,
-    messages,
-    tools: researchTools,
-    stopWhen: stepCountIs(AI_CONFIG.maxToolSteps),
-    maxRetries: AI_CONFIG.maxRetries,
-  });
+  // Chat mode formats the specialist's findings directly.
+  // No additional Gemini request is needed.
+  const findings = agent.findings
+    .map(
+      (finding) =>
+        `- **${finding.title}** (${finding.importance} importance): ${finding.description}`
+    )
+    .join("\n");
+
+  const insights = agent.keyInsights
+    .map((insight) => `- ${insight}`)
+    .join("\n");
+
+  const limitations = agent.limitations
+    .map((limitation) => `- ${limitation}`)
+    .join("\n");
+
+  const reply = [
+    `## Research Summary\n\n${agent.summary}`,
+    findings ? `## Key Findings\n\n${findings}` : "",
+    insights ? `## Key Insights\n\n${insights}` : "",
+    limitations ? `## Limitations\n\n${limitations}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   return {
-    reply: result.text || "No research response was generated.",
+    reply,
     report: null,
-    sources,
-    toolsUsed,
+    sources: research.sources,
+    toolsUsed: research.toolsUsed,
   };
 }
