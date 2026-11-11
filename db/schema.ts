@@ -6,6 +6,8 @@ import {
   uuid,
   index,
   integer,
+  uniqueIndex,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -245,5 +247,51 @@ export const competitorComparisons = pgTable(
     index("competitor_comparisons_current_snapshot_id_idx").on(
       table.currentSnapshotId
     ),
+  ]
+);
+
+// Automatic competitor monitoring
+export const competitorMonitoring = pgTable(
+  "competitor_monitoring",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    competitorId: uuid("competitor_id")
+      .references(() => competitors.id, { onDelete: "cascade" })
+      .notNull(),
+
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+
+    isEnabled: boolean("is_enabled").default(false).notNull(),
+
+    frequency: text("frequency")
+      .$type<"daily" | "weekly">()
+      .default("weekly")
+      .notNull(),
+
+    nextRunAt: timestamp("next_run_at"),
+
+    lastRunAt: timestamp("last_run_at"),
+
+    lastAttemptAt: timestamp("last_attempt_at"),
+
+    lastError: text("last_error"),
+
+    failureCount: integer("failure_count").default(0).notNull(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("competitor_monitoring_competitor_id_unique").on(
+      table.competitorId
+    ),
+
+    index("competitor_monitoring_user_id_idx").on(table.userId),
+
+    index("competitor_monitoring_due_idx").on(table.isEnabled, table.nextRunAt),
   ]
 );

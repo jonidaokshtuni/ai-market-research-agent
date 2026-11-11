@@ -36,6 +36,13 @@
       "when": 1794408030635,
       "tag": "0004_add_competitor_comparisons",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794409092892,
+      "tag": "0005_add_competitor_monitoring",
+      "breakpoints": true
     }
   ]
 }
