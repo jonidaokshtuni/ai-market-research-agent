@@ -5,6 +5,7 @@ import {
   jsonb,
   uuid,
   index,
+  integer,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -69,3 +70,43 @@ export const messages = pgTable("messages", {
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Competitor intelligence
+export const competitors = pgTable(
+  "competitors",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+
+    name: text("name").notNull(),
+
+    website: text("website"),
+
+    industry: text("industry"),
+
+    description: text("description"),
+
+    products: text("products"),
+
+    pricing: text("pricing"),
+
+    strengths: text("strengths"),
+
+    weaknesses: text("weaknesses"),
+
+    marketStrength: integer("market_strength").default(50).notNull(),
+
+    innovationScore: integer("innovation_score").default(50).notNull(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("competitors_user_id_idx").on(table.userId),
+    index("competitors_created_at_idx").on(table.createdAt),
+  ]
+);
