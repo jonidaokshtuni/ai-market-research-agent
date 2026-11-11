@@ -3,6 +3,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getDashboardStats } from "@/lib/dashboard/queries";
 
+import { getResearchHistory } from "@/lib/dashboard/queries";
+import ResearchHistoryTable from "@/components/dashboard/research-history-table";
+
 async function DashboardContent() {
   const user = await getCurrentUser();
 
@@ -11,6 +14,7 @@ async function DashboardContent() {
   }
 
   const stats = await getDashboardStats(user.id);
+  const researchHistory = await getResearchHistory(user.id);
 
   const cards = [
     {
@@ -87,6 +91,7 @@ async function DashboardContent() {
             </div>
           )}
         </section>
+        <ResearchHistoryTable data={researchHistory} />
       </div>
     </div>
   );

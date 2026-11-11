@@ -4,6 +4,7 @@ import { runReportGenerator } from "./agents/report-generator";
 import type { GeneratedMarketReport } from "./agents/report-generator";
 
 export type MarketReport = GeneratedMarketReport;
+
 export type ResearchSource = {
   title: string;
   url: string;
@@ -23,6 +24,8 @@ export async function runResearchAgent({
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   mode: "chat" | "report";
 }): Promise<ResearchResult> {
+  console.log("[Research] Starting agent. Mode:", mode);
+
   const conversation = messages
     .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
     .join("\n\n");
@@ -31,7 +34,6 @@ export async function runResearchAgent({
     .reverse()
     .find((message) => message.role === "user");
 
-  // Handle simple greetings without starting a research task.
   const latestMessage = latestUserMessage?.content.trim() ?? "";
 
   if (
@@ -46,6 +48,7 @@ export async function runResearchAgent({
       toolsUsed: [],
     };
   }
+
   const researchTask = `
 Research the following conversation and respond to the latest user request.
 
@@ -59,19 +62,27 @@ ${
 }
 `;
 
-  // Run only one research specialist.
+  console.log("[Research] Starting market researcher...");
+
   const research = await runMarketResearcher({
     task: researchTask,
   });
 
+  console.log("[Research] Market researcher completed.");
+  console.log("[Research] Sources:", research.sources.length);
+  console.log("[Research] Tools:", research.toolsUsed);
+
   const agent = research.result;
 
-  // Report mode uses the report generator.
   if (mode === "report") {
+    console.log("[Research] Starting report generator...");
+
     const report = await runReportGenerator({
       originalTask: researchTask,
       agents: [agent],
     });
+
+    console.log("[Research] Report generator completed.");
 
     return {
       reply: report.summary,
@@ -81,8 +92,8 @@ ${
     };
   }
 
-  // Chat mode formats the specialist's findings directly.
-  // No additional Gemini request is needed.
+  console.log("[Research] Formatting chat response...");
+
   const findings = agent.findings
     .map(
       (finding) =>
@@ -106,6 +117,8 @@ ${
   ]
     .filter(Boolean)
     .join("\n\n");
+
+  console.log("[Research] Chat completed.");
 
   return {
     reply,

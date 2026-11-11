@@ -2,12 +2,15 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { ShieldCheck, Sparkles } from "lucide-react";
 
 import { getCurrentUser } from "@/lib/auth";
 import WorkspaceNav from "@/components/dashboard/workspace-nav";
 import LogoutButton from "@/components/auth/logout-button";
+
 export const instant = false;
+
 async function WorkspaceHeader({
   user,
 }: {
@@ -46,6 +49,8 @@ export default async function WorkspaceLayout({
 }: {
   children: ReactNode;
 }) {
+  await connection();
+
   const user = await getCurrentUser();
 
   if (!user) {

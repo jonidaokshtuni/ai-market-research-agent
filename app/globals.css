@@ -24,3 +24,85 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Research report PDF / print styles */
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Hide everything outside the selected report */
+  body * {
+    visibility: hidden;
+  }
+
+  .report-print-area,
+  .report-print-area * {
+    visibility: visible;
+  }
+
+  /* Position the report at the beginning of the PDF */
+  .report-print-area {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    box-sizing: border-box;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+
+  /* Prevent the original card from clipping content */
+  .report-print-area,
+  .report-print-area * {
+    overflow: visible;
+  }
+
+  /* Allow long report sections to continue onto new pages */
+  .report-print-area article,
+  .report-print-area section {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .report-print-area h1,
+  .report-print-area h2,
+  .report-print-area h3,
+  .report-print-area h4 {
+    color: #111827 !important;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .report-print-area p,
+  .report-print-area li {
+    color: #374151 !important;
+    overflow-wrap: anywhere;
+    orphans: 3;
+    widows: 3;
+  }
+
+  .report-print-area a {
+    color: #1d4ed8 !important;
+    text-decoration: underline;
+    overflow-wrap: anywhere;
+  }
+
+  .report-print-area .report-print-hide {
+    display: none !important;
+  }
+}
