@@ -22,6 +22,20 @@
       "when": 1794401413884,
       "tag": "0002_ambitious_ogun",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794406635554,
+      "tag": "0003_add_competitor_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794408030635,
+      "tag": "0004_add_competitor_comparisons",
+      "breakpoints": true
     }
   ]
 }

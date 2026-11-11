@@ -7,6 +7,8 @@ import { db } from "@/db";
 import { competitors } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 
+import CompetitorResearchPanel from "@/components/dashboard/competitors/competitor-research-panel";
+
 type CompetitorProfilePageProps = {
   params: Promise<{
     id: string;
@@ -262,6 +264,12 @@ export default async function CompetitorProfilePage({
           />
         </div>
       </section>
+
+      {/* AI competitor intelligence */}
+      <CompetitorResearchPanel
+        competitorId={competitor.id}
+        competitorName={competitor.name}
+      />
 
       {/* Record information */}
       <section className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5 sm:p-6">

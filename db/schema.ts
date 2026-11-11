@@ -110,3 +110,140 @@ export const competitors = pgTable(
     index("competitors_created_at_idx").on(table.createdAt),
   ]
 );
+
+// Competitor research snapshots
+export const competitorSnapshots = pgTable(
+  "competitor_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    competitorId: uuid("competitor_id")
+      .references(() => competitors.id, { onDelete: "cascade" })
+      .notNull(),
+
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+
+    researchTask: text("research_task").notNull(),
+
+    summary: text("summary").notNull(),
+
+    findings: jsonb("findings")
+      .$type<
+        {
+          title: string;
+          description: string;
+          importance: "high" | "medium" | "low";
+          sources: {
+            title: string;
+            url: string;
+          }[];
+        }[]
+      >()
+      .notNull(),
+
+    keyInsights: jsonb("key_insights").$type<string[]>().notNull(),
+
+    limitations: jsonb("limitations").$type<string[]>().notNull(),
+
+    sources: jsonb("sources")
+      .$type<
+        {
+          title: string;
+          url: string;
+        }[]
+      >()
+      .notNull(),
+
+    toolsUsed: jsonb("tools_used").$type<string[]>().notNull(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("competitor_snapshots_competitor_id_idx").on(table.competitorId),
+    index("competitor_snapshots_user_id_idx").on(table.userId),
+    index("competitor_snapshots_created_at_idx").on(table.createdAt),
+  ]
+);
+
+export const competitorComparisons = pgTable(
+  "competitor_comparisons",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    competitorId: uuid("competitor_id")
+      .references(() => competitors.id, { onDelete: "cascade" })
+      .notNull(),
+
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+
+    previousSnapshotId: uuid("previous_snapshot_id")
+      .references(() => competitorSnapshots.id, { onDelete: "cascade" })
+      .notNull(),
+
+    currentSnapshotId: uuid("current_snapshot_id")
+      .references(() => competitorSnapshots.id, { onDelete: "cascade" })
+      .notNull(),
+
+    summary: text("summary").notNull(),
+
+    overallImpact: text("overall_impact")
+      .$type<"high" | "medium" | "low" | "none">()
+      .notNull(),
+
+    changes: jsonb("changes")
+      .$type<
+        {
+          category:
+            | "product"
+            | "pricing"
+            | "positioning"
+            | "strategy"
+            | "strength"
+            | "weakness"
+            | "market";
+
+          changeType: "new" | "changed" | "removed" | "strategic_shift";
+
+          title: string;
+          description: string;
+          previousValue: string | null;
+          currentValue: string | null;
+          impact: "high" | "medium" | "low";
+          confidence: "high" | "medium" | "low";
+          sources: {
+            title: string;
+            url: string;
+          }[];
+        }[]
+      >()
+      .notNull(),
+
+    limitations: jsonb("limitations").$type<string[]>().notNull(),
+
+    sources: jsonb("sources")
+      .$type<
+        {
+          title: string;
+          url: string;
+        }[]
+      >()
+      .notNull(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("competitor_comparisons_competitor_id_idx").on(table.competitorId),
+    index("competitor_comparisons_user_id_idx").on(table.userId),
+    index("competitor_comparisons_created_at_idx").on(table.createdAt),
+    index("competitor_comparisons_previous_snapshot_id_idx").on(
+      table.previousSnapshotId
+    ),
+    index("competitor_comparisons_current_snapshot_id_idx").on(
+      table.currentSnapshotId
+    ),
+  ]
+);
