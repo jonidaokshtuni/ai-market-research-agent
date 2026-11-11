@@ -1,18 +1,18 @@
 import { Suspense } from "react";
-import { auth } from "@clerk/nextjs/server";
+
 import { redirect } from "next/navigation";
 
 import { getDashboardStats } from "@/lib/dashboard/queries";
 import ResearchActivityChart from "@/components/dashboard/research-activity-chart";
+import { getCurrentUser } from "@/lib/auth";
 
 async function AnalyticsContent() {
-  const { userId } = await auth();
+  const user = await getCurrentUser();
 
-  if (!userId) {
-    redirect("/sign-in");
+  if (!user) {
+    redirect("/login");
   }
-
-  const stats = await getDashboardStats(userId);
+  const stats = await getDashboardStats(user.id);
 
   const totalRequests = stats.activity.reduce(
     (total, day) => total + day.total,

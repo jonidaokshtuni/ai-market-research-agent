@@ -1,33 +1,35 @@
-import { auth } from "@clerk/nextjs/server";
+import { and, desc, eq } from "drizzle-orm";
+
 import { db } from "@/db";
 import {
   messages as messagesTable,
   sessions as sessionsTable,
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
-
-import { ChatRequestSchema } from "@/lib/validation/chat";
+import { getCurrentUser } from "@/lib/auth";
 import { runResearchAgent } from "@/lib/ai/orchestrator";
+import { ChatMessageSchema, ChatRequestSchema } from "@/lib/validation/chat";
 
 export const maxDuration = 30;
 
+const MAX_HISTORY_MESSAGES = 30;
+
 export async function POST(req: Request) {
   try {
-    //  Authenticate the user
-    const { userId } = await auth();
+    //  Authenticate the user.
+    const user = await getCurrentUser();
 
-    if (!userId) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user) {
+      return Response.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    //  Parse request body
+    //  Parse the request body.
     const body: unknown = await req.json().catch(() => null);
 
-    if (!body) {
+    if (body === null) {
       return Response.json({ error: "Invalid JSON request." }, { status: 400 });
     }
 
-    // Validate request
+    // Validate the request.
     const validation = ChatRequestSchema.safeParse(body);
 
     if (!validation.success) {
@@ -40,14 +42,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const { messages, mode, sessionId } = validation.data;
+    const { message, mode, sessionId } = validation.data;
 
-    //  Verify session ownership
+    //  Verify session ownership.
     const [session] = await db
-      .select()
+      .select({ id: sessionsTable.id })
       .from(sessionsTable)
       .where(
-        and(eq(sessionsTable.id, sessionId), eq(sessionsTable.userId, userId))
+        and(eq(sessionsTable.id, sessionId), eq(sessionsTable.userId, user.id))
       )
       .limit(1);
 
@@ -58,50 +60,71 @@ export async function POST(req: Request) {
       );
     }
 
-    //  Identify latest user message
-    const latestUserMessage = [...messages]
-      .reverse()
-      .find((message) => message.role === "user");
-
-    if (!latestUserMessage) {
-      return Response.json(
-        { error: "A user message is required." },
-        { status: 400 }
-      );
-    }
-
-    // Persist user message
-    await db.insert(messagesTable).values({
-      sessionId,
-      role: "user",
-      content: latestUserMessage.content,
-    });
-
-    // Update session title
+    //  Check whether this is the first message.
     const existingMessages = await db
       .select({ id: messagesTable.id })
       .from(messagesTable)
       .where(eq(messagesTable.sessionId, sessionId))
-      .limit(2);
+      .limit(1);
 
-    if (existingMessages.length === 1) {
+    const isFirstMessage = existingMessages.length === 0;
+
+    //  Persist the new user message.
+    await db.insert(messagesTable).values({
+      sessionId,
+      role: "user",
+      content: message,
+    });
+
+    //  Set the session title on the first message.
+    if (isFirstMessage) {
       await db
         .update(sessionsTable)
         .set({
-          title: latestUserMessage.content.slice(0, 60),
+          title: message.slice(0, 60),
         })
         .where(
-          and(eq(sessionsTable.id, sessionId), eq(sessionsTable.userId, userId))
+          and(
+            eq(sessionsTable.id, sessionId),
+            eq(sessionsTable.userId, user.id)
+          )
         );
     }
 
-    //  Execute AI research
+    // 8. Load trusted conversation history from the database.
+    const storedMessages = await db
+      .select({
+        role: messagesTable.role,
+        content: messagesTable.content,
+      })
+      .from(messagesTable)
+      .where(eq(messagesTable.sessionId, sessionId))
+      .orderBy(desc(messagesTable.createdAt))
+      .limit(MAX_HISTORY_MESSAGES);
+
+    // Restore chronological order and validate stored messages.
+    const conversationHistory = storedMessages
+      .reverse()
+      .flatMap((storedMessage) => {
+        const parsed = ChatMessageSchema.safeParse(storedMessage);
+
+        return parsed.success ? [parsed.data] : [];
+      });
+
+    if (
+      conversationHistory.length === 0 ||
+      conversationHistory[conversationHistory.length - 1]?.role !== "user"
+    ) {
+      throw new Error("Invalid conversation history.");
+    }
+
+    // 9. Execute the research agent.
     const result = await runResearchAgent({
-      messages,
+      messages: conversationHistory,
       mode,
     });
 
-    // Persist assistant response
+    // 10. Persist the assistant response.
     await db.insert(messagesTable).values({
       sessionId,
       role: "assistant",
@@ -111,7 +134,7 @@ export async function POST(req: Request) {
       toolsUsed: result.toolsUsed,
     });
 
-    //  Return response
+    // 11. Return the response.
     return Response.json({
       success: true,
       mode,

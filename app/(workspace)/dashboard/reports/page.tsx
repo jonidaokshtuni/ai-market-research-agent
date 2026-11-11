@@ -1,10 +1,10 @@
 import { Suspense } from "react";
-import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { desc, eq, and, isNotNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { messages, sessions } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth";
 
 type ReportData = {
   summary?: string;
@@ -12,10 +12,10 @@ type ReportData = {
 };
 
 async function ReportsContent() {
-  const { userId } = await auth();
+  const user = await getCurrentUser();
 
-  if (!userId) {
-    redirect("/sign-in");
+  if (!user) {
+    redirect("/login");
   }
 
   const reports = await db
@@ -30,7 +30,7 @@ async function ReportsContent() {
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
     .where(
       and(
-        eq(sessions.userId, userId),
+        eq(sessions.userId, user.id),
         eq(messages.role, "assistant"),
         isNotNull(messages.report)
       )

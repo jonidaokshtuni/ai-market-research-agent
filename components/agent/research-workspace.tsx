@@ -49,40 +49,44 @@ export default function ResearchWorkspace() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    loadSessions();
-  }, []);
+    async function loadSessions() {
+      try {
+        setLoadingSessions(true);
+        setError("");
 
-  async function loadSessions() {
-    try {
-      setLoadingSessions(true);
+        const response = await fetch("/api/sessions");
 
-      const response = await fetch("/api/sessions");
+        if (!response.ok) {
+          throw new Error("Failed to load research sessions.");
+        }
 
-      if (!response.ok) {
-        throw new Error("Could not load research sessions.");
+        const data: { sessions?: Session[] } = await response.json();
+        const loadedSessions = data.sessions ?? [];
+
+        setSessions(loadedSessions);
+
+        // Restore the most recent session when the workspace loads.
+        if (loadedSessions.length > 0) {
+          setActiveId(loadedSessions[0].id);
+          setMessages(loadedSessions[0].messages ?? []);
+        } else {
+          setActiveId("");
+          setMessages([]);
+        }
+      } catch (error) {
+        console.error("Failed to load sessions:", error);
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load research sessions."
+        );
+      } finally {
+        setLoadingSessions(false);
       }
-
-      const data = await response.json();
-      const loadedSessions: Session[] = Array.isArray(data)
-        ? data
-        : data.sessions ?? [];
-
-      setSessions(loadedSessions);
-
-      if (loadedSessions.length > 0) {
-        const firstSession = loadedSessions[0];
-        setActiveId(firstSession.id);
-        setMessages(firstSession.messages ?? []);
-      } else {
-        await createNewSession();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setLoadingSessions(false);
     }
-  }
 
+    void loadSessions();
+  }, []);
   async function createNewSession() {
     try {
       setError("");
@@ -164,18 +168,13 @@ export default function ResearchWorkspace() {
     setError("");
 
     try {
-      const apiMessages = updatedMessages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      }));
-
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: apiMessages,
+          message: question,
           mode,
           sessionId: activeId,
         }),
@@ -191,7 +190,7 @@ export default function ResearchWorkspace() {
 
       const assistantMessage: Message = {
         role: "assistant",
-        content: data.message ?? data.content ?? "",
+        content: data.reply,
         report: data.report ?? null,
         sources: data.sources ?? [],
         toolsUsed: data.toolsUsed ?? [],

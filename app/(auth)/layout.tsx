@@ -20,7 +20,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
           </span>
         </Link>
 
-        {/* Clerk authentication */}
+        {/* Authentication pages */}
         {children}
 
         <p className="mt-8 text-center text-xs text-slate-500">

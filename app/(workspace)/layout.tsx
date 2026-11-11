@@ -1,15 +1,21 @@
 import type { ReactNode } from "react";
 import { Suspense } from "react";
 import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
-import { UserButton } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
 import { ShieldCheck, Sparkles } from "lucide-react";
 
+import { getCurrentUser } from "@/lib/auth";
 import WorkspaceNav from "@/components/dashboard/workspace-nav";
-
-async function WorkspaceHeader() {
-  const { userId } = await auth();
-
+import LogoutButton from "@/components/auth/logout-button";
+export const instant = false;
+async function WorkspaceHeader({
+  user,
+}: {
+  user: {
+    name: string | null;
+    email: string;
+  };
+}) {
   return (
     <header className="sticky top-0 z-20 flex min-h-[76px] items-center justify-between border-b border-white/[0.06] bg-[#0c1322]/95 px-5 backdrop-blur-xl sm:px-8">
       <div>
@@ -21,23 +27,31 @@ async function WorkspaceHeader() {
         </p>
       </div>
 
-      <div>
-        {userId ? (
-          <UserButton />
-        ) : (
-          <Link
-            href="/sign-in"
-            className="rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-400"
-          >
-            Sign in
-          </Link>
-        )}
+      <div className="flex items-center gap-4">
+        <div className="hidden text-right sm:block">
+          <p className="text-sm font-medium text-slate-200">
+            {user.name || "Account"}
+          </p>
+          <p className="text-xs text-slate-500">{user.email}</p>
+        </div>
+
+        <LogoutButton />
       </div>
     </header>
   );
 }
 
-export default function WorkspaceLayout({ children }: { children: ReactNode }) {
+export default async function WorkspaceLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
   return (
     <div className="min-h-screen bg-[#080d19] text-white md:flex">
       <aside className="flex w-full shrink-0 flex-col border-b border-white/[0.06] bg-[#0c1322] p-5 md:sticky md:top-0 md:h-screen md:w-[270px] md:border-b-0 md:border-r">
@@ -97,7 +111,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
             <header className="min-h-[76px] border-b border-white/[0.06] bg-[#0c1322]" />
           }
         >
-          <WorkspaceHeader />
+          <WorkspaceHeader user={user} />
         </Suspense>
 
         <main className="p-4 sm:p-6 lg:p-8">{children}</main>

@@ -1,16 +1,16 @@
 import { Suspense } from "react";
-import { auth } from "@clerk/nextjs/server";
+import { getCurrentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getDashboardStats } from "@/lib/dashboard/queries";
 
 async function DashboardContent() {
-  const { userId } = await auth();
+  const user = await getCurrentUser();
 
-  if (!userId) {
-    redirect("/sign-in");
+  if (!user) {
+    redirect("/login");
   }
 
-  const stats = await getDashboardStats(userId);
+  const stats = await getDashboardStats(user.id);
 
   const cards = [
     {

@@ -1,13 +1,13 @@
 import { Suspense } from "react";
-import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import ResearchWorkspace from "@/components/agent/research-workspace";
+import { getCurrentUser } from "@/lib/auth";
 
 async function AgentContent() {
-  const { userId } = await auth();
+  const user = await getCurrentUser();
 
-  if (!userId) {
-    redirect("/sign-in");
+  if (!user) {
+    redirect("/login");
   }
 
   return (
