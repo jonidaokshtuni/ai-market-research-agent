@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { competitors, competitorSnapshots } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 import { runAndSaveCompetitorResearch } from "@/lib/ai/services/competitor-research";
 
 type RouteContext = {
@@ -14,13 +15,21 @@ type RouteContext = {
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
-// GET: Retrieve competitor research history
 export async function GET(request: Request, { params }: RouteContext) {
   try {
     const user = await getCurrentUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace found" },
+        { status: 403 }
+      );
     }
 
     const { id } = await params;
@@ -32,11 +41,15 @@ export async function GET(request: Request, { params }: RouteContext) {
       );
     }
 
-    // Verify competitor ownership
     const [competitor] = await db
       .select({ id: competitors.id })
       .from(competitors)
-      .where(and(eq(competitors.id, id), eq(competitors.userId, user.id)))
+      .where(
+        and(
+          eq(competitors.id, id),
+          eq(competitors.organizationId, workspace.id)
+        )
+      )
       .limit(1);
 
     if (!competitor) {
@@ -46,9 +59,7 @@ export async function GET(request: Request, { params }: RouteContext) {
       );
     }
 
-    // Validate pagination parameters
     const searchParams = new URL(request.url).searchParams;
-
     const rawLimit = searchParams.get("limit") ?? String(DEFAULT_LIMIT);
     const rawOffset = searchParams.get("offset") ?? "0";
 
@@ -70,16 +81,10 @@ export async function GET(request: Request, { params }: RouteContext) {
       );
     }
 
-    // Fetch one additional record to determine whether another page exists
     const results = await db
       .select()
       .from(competitorSnapshots)
-      .where(
-        and(
-          eq(competitorSnapshots.competitorId, id),
-          eq(competitorSnapshots.userId, user.id)
-        )
-      )
+      .where(eq(competitorSnapshots.competitorId, id))
       .orderBy(
         desc(competitorSnapshots.createdAt),
         desc(competitorSnapshots.id)
@@ -109,13 +114,21 @@ export async function GET(request: Request, { params }: RouteContext) {
   }
 }
 
-// POST: Run and save competitor research
 export async function POST(_request: Request, { params }: RouteContext) {
   try {
     const user = await getCurrentUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace found" },
+        { status: 403 }
+      );
     }
 
     const { id } = await params;
@@ -130,6 +143,7 @@ export async function POST(_request: Request, { params }: RouteContext) {
     const snapshot = await runAndSaveCompetitorResearch({
       competitorId: id,
       userId: user.id,
+      organizationId: workspace.id,
     });
 
     if (!snapshot) {

@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { organizationInvitations, organizationJoinRequests } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { getUserWorkspaces } from "@/lib/organizations/access";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 import WorkspaceNav from "@/components/dashboard/workspace-nav";
 import UserMenu from "@/components/dashboard/user-menu";
@@ -86,6 +87,8 @@ async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
     }
   }
 
+  const activeWorkspace = await getActiveWorkspace(user.id, workspaces);
+
   const canManageMembers = workspaces.some(
     (workspace) => workspace.role === "owner" || workspace.role === "admin"
   );
@@ -94,7 +97,6 @@ async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Invitation dialog */}
       <InvitationPrompt userEmail={user.email} />
 
       {/* Desktop sidebar */}
@@ -136,11 +138,16 @@ async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
               Market Intelligence
             </p>
             <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">
-              Your research workspace
+              {activeWorkspace?.name ?? "Your research workspace"}
             </p>
           </div>
 
-          <UserMenu name={displayName} email={user.email} />
+          <UserMenu
+            name={displayName}
+            email={user.email}
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspace?.id ?? ""}
+          />
         </header>
 
         {/* Mobile navigation */}

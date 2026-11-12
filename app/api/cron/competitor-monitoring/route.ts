@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, asc, eq, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { competitorMonitoring } from "@/db/schema";
+import { competitors, competitorMonitoring } from "@/db/schema";
 import { runAndSaveCompetitorResearch } from "@/lib/ai/services/competitor-research";
 
 const BATCH_SIZE = 10;
@@ -44,16 +44,21 @@ export async function GET(request: Request) {
   const now = new Date();
 
   try {
-    // Find enabled monitoring jobs that are due.
+    // Fetch the competitor's workspace together with each due monitoring job.
     const dueJobs = await db
       .select({
         id: competitorMonitoring.id,
         competitorId: competitorMonitoring.competitorId,
         userId: competitorMonitoring.userId,
+        organizationId: competitors.organizationId,
         frequency: competitorMonitoring.frequency,
         failureCount: competitorMonitoring.failureCount,
       })
       .from(competitorMonitoring)
+      .innerJoin(
+        competitors,
+        eq(competitorMonitoring.competitorId, competitors.id)
+      )
       .where(
         and(
           eq(competitorMonitoring.isEnabled, true),
@@ -70,8 +75,28 @@ export async function GET(request: Request) {
     }[] = [];
 
     for (const job of dueJobs) {
+      // A competitor without a workspace must not be researched by this worker.
+      if (!job.organizationId) {
+        await db
+          .update(competitorMonitoring)
+          .set({
+            isEnabled: false,
+            nextRunAt: null,
+            lastError: "Monitoring disabled: competitor has no workspace",
+            updatedAt: new Date(),
+          })
+          .where(eq(competitorMonitoring.id, job.id));
+
+        results.push({
+          competitorId: job.competitorId,
+          status: "skipped",
+          message: "Competitor is not assigned to a workspace",
+        });
+
+        continue;
+      }
+
       // Atomically claim the job.
-      // A second worker cannot claim it after nextRunAt changes.
       const leaseUntil = new Date(Date.now() + JOB_LEASE_MINUTES * 60 * 1000);
 
       const [claimedJob] = await db
@@ -103,17 +128,16 @@ export async function GET(request: Request) {
       }
 
       try {
-        // Reuse the existing research and change detection service.
         const snapshot = await runAndSaveCompetitorResearch({
           competitorId: job.competitorId,
           userId: job.userId,
+          organizationId: job.organizationId,
         });
 
         if (!snapshot) {
-          throw new Error("Competitor was not found");
+          throw new Error("Competitor was not found in its workspace");
         }
 
-        // Schedule the next successful research run.
         await db
           .update(competitorMonitoring)
           .set({
@@ -145,7 +169,6 @@ export async function GET(request: Request) {
           error instanceof Error ? error.message : "Unknown research error";
 
         const retryMinutes = getRetryDelay(job.failureCount);
-
         const retryAt = new Date(Date.now() + retryMinutes * 60 * 1000);
 
         await db

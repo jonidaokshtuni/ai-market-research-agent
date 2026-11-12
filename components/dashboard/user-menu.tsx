@@ -2,11 +2,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronDown, LogOut, UserRound } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  LogOut,
+  Loader2,
+  UserRound,
+  Users,
+} from "lucide-react";
+
+type Workspace = {
+  id: string;
+  name: string;
+  role: "owner" | "admin" | "member";
+};
 
 type UserMenuProps = {
   name: string;
   email: string;
+  workspaces: Workspace[];
+  activeWorkspaceId: string;
 };
 
 export default function UserMenu(props: UserMenuProps) {
@@ -15,13 +30,23 @@ export default function UserMenu(props: UserMenuProps) {
   return <UserMenuContent key={pathname} {...props} />;
 }
 
-function UserMenuContent({ name, email }: UserMenuProps) {
+function UserMenuContent({
+  name,
+  email,
+  workspaces,
+  activeWorkspaceId,
+}: UserMenuProps) {
   const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState("");
   const [error, setError] = useState("");
+
+  const activeWorkspace = workspaces.find(
+    (workspace) => workspace.id === activeWorkspaceId
+  );
 
   const initials = (name || email)
     .split(/\s+/)
@@ -31,7 +56,6 @@ function UserMenuContent({ name, email }: UserMenuProps) {
     .join("")
     .toUpperCase();
 
-  // Close the menu when clicking outside or pressing Escape.
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -53,6 +77,49 @@ function UserMenuContent({ name, email }: UserMenuProps) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
+
+  async function handleWorkspaceSwitch(workspaceId: string) {
+    if (switchingWorkspaceId || workspaceId === activeWorkspaceId) {
+      return;
+    }
+
+    setSwitchingWorkspaceId(workspaceId);
+    setError("");
+
+    try {
+      const response = await fetch("/api/organizations/active-workspace", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({ workspaceId }),
+      });
+
+      const data: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const message =
+          typeof data === "object" &&
+          data !== null &&
+          "error" in data &&
+          typeof data.error === "string"
+            ? data.error
+            : "Unable to switch workspace.";
+
+        throw new Error(message);
+      }
+
+      setIsOpen(false);
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to switch workspace."
+      );
+    } finally {
+      setSwitchingWorkspaceId("");
+    }
+  }
 
   async function handleLogout() {
     if (isLoggingOut) return;
@@ -114,7 +181,7 @@ function UserMenuContent({ name, email }: UserMenuProps) {
         <div
           role="menu"
           aria-label="User account menu"
-          className="absolute right-0 top-full z-50 mt-3 w-72 overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl shadow-black/40"
+          className="absolute right-0 top-full z-50 mt-3 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl shadow-black/40"
         >
           <div className="border-b border-white/[0.07] p-4">
             <div className="flex items-center gap-3">
@@ -131,6 +198,59 @@ function UserMenuContent({ name, email }: UserMenuProps) {
             </div>
           </div>
 
+          {workspaces.length > 0 && (
+            <div className="border-b border-white/[0.07] p-3">
+              <div className="mb-2 flex items-center gap-2 px-2">
+                <Users size={14} className="text-indigo-400" />
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Switch workspace
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                {workspaces.map((workspace) => {
+                  const isActive = workspace.id === activeWorkspaceId;
+                  const isSwitching = switchingWorkspaceId === workspace.id;
+
+                  return (
+                    <button
+                      key={workspace.id}
+                      type="button"
+                      role="menuitem"
+                      disabled={Boolean(switchingWorkspaceId) || isActive}
+                      onClick={() => handleWorkspaceSwitch(workspace.id)}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/[0.06] disabled:cursor-default disabled:opacity-70"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-200">
+                          {workspace.name}
+                        </p>
+                        <p className="mt-0.5 text-[11px] capitalize text-slate-500">
+                          {workspace.role}
+                        </p>
+                      </div>
+
+                      {isSwitching ? (
+                        <Loader2
+                          size={16}
+                          className="shrink-0 animate-spin text-indigo-400"
+                        />
+                      ) : isActive ? (
+                        <Check size={16} className="shrink-0 text-indigo-400" />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeWorkspace && (
+                <p className="mt-2 truncate px-2 text-[11px] text-slate-500">
+                  Active: {activeWorkspace.name}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="p-2">
             {error && (
               <p className="px-3 py-2 text-xs text-red-400" role="alert">
@@ -142,7 +262,7 @@ function UserMenuContent({ name, email }: UserMenuProps) {
               type="button"
               role="menuitem"
               onClick={handleLogout}
-              disabled={isLoggingOut}
+              disabled={isLoggingOut || Boolean(switchingWorkspaceId)}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <LogOut size={17} />

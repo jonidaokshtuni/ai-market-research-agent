@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { redirect } from "next/navigation";
 
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 import { getResearchReports } from "@/lib/dashboard/queries";
 import ReportsLibrary, {
   type ResearchReport,
@@ -17,9 +18,21 @@ async function ReportsContent() {
     redirect("/login");
   }
 
-  const rows = await getResearchReports(user.id);
+  const workspace = await getActiveWorkspace(user.id);
 
-  // The report and sources columns are stored as JSON in the database.
+  if (!workspace) {
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-white">
+        <h1 className="text-xl font-semibold">No workspace available</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          Join or create a workspace to access research reports.
+        </p>
+      </div>
+    );
+  }
+
+  const rows = await getResearchReports(workspace.id);
+
   const reports: ResearchReport[] = rows.map((row) => ({
     id: row.id,
     sessionId: row.sessionId,
@@ -39,9 +52,9 @@ async function ReportsContent() {
           Research Reports
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-          Browse, search, and review your generated market research reports,
-          including trends, SWOT analysis, strategic recommendations, and
-          supporting sources.
+          Browse, search, and review research reports generated in{" "}
+          {workspace.name}, including trends, SWOT analysis, strategic
+          recommendations, and supporting sources.
         </p>
       </div>
 

@@ -1,7 +1,9 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
+
 import ResearchWorkspace from "@/components/agent/research-workspace";
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 async function AgentContent() {
   const user = await getCurrentUser();
@@ -10,9 +12,20 @@ async function AgentContent() {
     redirect("/login");
   }
 
+  const activeWorkspace = await getActiveWorkspace(user.id);
+
+  if (!activeWorkspace) {
+    redirect("/dashboard");
+  }
+
   return (
     <div className="min-w-0">
-      <ResearchWorkspace />
+      <ResearchWorkspace
+        key={activeWorkspace.id}
+        workspaceId={activeWorkspace.id}
+        workspaceRole={activeWorkspace.role}
+        userId={user.id}
+      />
     </div>
   );
 }

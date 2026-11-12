@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { messages, sessions } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 export async function GET() {
   try {
@@ -16,17 +17,26 @@ export async function GET() {
       );
     }
 
-    const userSessions = await db
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace found." },
+        { status: 403 }
+      );
+    }
+
+    const workspaceSessions = await db
       .select()
       .from(sessions)
-      .where(eq(sessions.userId, user.id))
+      .where(eq(sessions.organizationId, workspace.id))
       .orderBy(desc(sessions.createdAt));
 
-    if (userSessions.length === 0) {
+    if (workspaceSessions.length === 0) {
       return NextResponse.json({ sessions: [] });
     }
 
-    const sessionIds = userSessions.map((session) => session.id);
+    const sessionIds = workspaceSessions.map((session) => session.id);
 
     const allMessages = await db
       .select()
@@ -42,7 +52,7 @@ export async function GET() {
       messagesBySession.set(message.sessionId, existing);
     }
 
-    const sessionsWithMessages = userSessions.map((session) => ({
+    const sessionsWithMessages = workspaceSessions.map((session) => ({
       ...session,
       messages: messagesBySession.get(session.id) ?? [],
     }));
@@ -68,6 +78,15 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Authentication required." },
         { status: 401 }
+      );
+    }
+
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace found." },
+        { status: 403 }
       );
     }
 
@@ -98,6 +117,7 @@ export async function POST(request: Request) {
       .insert(sessions)
       .values({
         userId: user.id,
+        organizationId: workspace.id,
         title,
       })
       .returning();
@@ -132,6 +152,15 @@ export async function DELETE(request: Request) {
       );
     }
 
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace found." },
+        { status: 403 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -142,14 +171,26 @@ export async function DELETE(request: Request) {
       );
     }
 
+    const canDeleteAnySession =
+      workspace.role === "owner" || workspace.role === "admin";
+
+    const conditions = [
+      eq(sessions.id, id),
+      eq(sessions.organizationId, workspace.id),
+    ];
+
+    if (!canDeleteAnySession) {
+      conditions.push(eq(sessions.userId, user.id));
+    }
+
     const [deletedSession] = await db
       .delete(sessions)
-      .where(and(eq(sessions.id, id), eq(sessions.userId, user.id)))
+      .where(and(...conditions))
       .returning({ id: sessions.id });
 
     if (!deletedSession) {
       return NextResponse.json(
-        { error: "Session not found." },
+        { error: "Research session not found or you cannot delete it." },
         { status: 404 }
       );
     }

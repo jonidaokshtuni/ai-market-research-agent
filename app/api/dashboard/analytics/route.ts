@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 import { getAnalyticsData } from "@/lib/dashboard/queries";
 
 function parseDate(value: string | null): Date | null {
@@ -20,8 +22,8 @@ function parseDate(value: string | null): Date | null {
 }
 
 export async function GET(request: Request) {
-  // Request-dependent APIs must remain outside the catch block
-  // so Next.js can handle its prerendering control signals.
+  // Keep request-dependent APIs outside the catch block so Next.js
+  // can handle its prerendering control signals.
   const user = await getCurrentUser();
   const { searchParams } = new URL(request.url);
 
@@ -30,6 +32,15 @@ export async function GET(request: Request) {
   }
 
   try {
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace found." },
+        { status: 403 }
+      );
+    }
+
     const startValue = searchParams.get("start");
     const endValue = searchParams.get("end");
 
@@ -60,7 +71,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const analytics = await getAnalyticsData(user.id, startDate, endDate);
+    const analytics = await getAnalyticsData(workspace.id, startDate, endDate);
 
     return NextResponse.json({
       ...analytics,

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
+import { z } from "zod";
+
 import { db } from "@/db";
 import { competitors } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { z } from "zod";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 const CompetitorSchema = z.object({
   name: z.string().trim().min(1).max(150),
@@ -18,7 +20,7 @@ const CompetitorSchema = z.object({
   innovationScore: z.number().int().min(0).max(100).optional(),
 });
 
-// GET: List the current user's competitors
+// GET: List all competitors in the active workspace.
 export async function GET() {
   try {
     const user = await getCurrentUser();
@@ -27,10 +29,19 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace" },
+        { status: 403 }
+      );
+    }
+
     const results = await db
       .select()
       .from(competitors)
-      .where(eq(competitors.userId, user.id))
+      .where(eq(competitors.organizationId, workspace.id))
       .orderBy(desc(competitors.createdAt));
 
     return NextResponse.json({ competitors: results });
@@ -44,13 +55,22 @@ export async function GET() {
   }
 }
 
-// POST: Create a competitor for the current user
+// POST: Create a competitor in the active workspace.
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace" },
+        { status: 403 }
+      );
     }
 
     let body: unknown;
@@ -79,6 +99,7 @@ export async function POST(request: Request) {
       .insert(competitors)
       .values({
         userId: user.id,
+        organizationId: workspace.id,
         name: data.name,
         website: data.website || null,
         industry: data.industry || null,

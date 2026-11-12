@@ -5,7 +5,7 @@ import { and, count, desc, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { messages, sessions } from "@/db/schema";
 
-export async function getDashboardStats(userId: string) {
+export async function getDashboardStats(organizationId: string) {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
   thirtyDaysAgo.setHours(0, 0, 0, 0);
@@ -15,7 +15,7 @@ export async function getDashboardStats(userId: string) {
       total: count(),
     })
     .from(sessions)
-    .where(eq(sessions.userId, userId));
+    .where(eq(sessions.organizationId, organizationId));
 
   const [reportStats] = await db
     .select({
@@ -23,7 +23,12 @@ export async function getDashboardStats(userId: string) {
     })
     .from(messages)
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
-    .where(and(eq(sessions.userId, userId), isNotNull(messages.report)));
+    .where(
+      and(
+        eq(sessions.organizationId, organizationId),
+        isNotNull(messages.report)
+      )
+    );
 
   const [sourceStats] = await db
     .select({
@@ -42,7 +47,12 @@ export async function getDashboardStats(userId: string) {
     })
     .from(messages)
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
-    .where(and(eq(sessions.userId, userId), eq(messages.role, "assistant")));
+    .where(
+      and(
+        eq(sessions.organizationId, organizationId),
+        eq(messages.role, "assistant")
+      )
+    );
 
   const activity = await db
     .select({
@@ -53,7 +63,7 @@ export async function getDashboardStats(userId: string) {
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
     .where(
       and(
-        eq(sessions.userId, userId),
+        eq(sessions.organizationId, organizationId),
         eq(messages.role, "user"),
         gte(messages.createdAt, thirtyDaysAgo)
       )
@@ -69,7 +79,7 @@ export async function getDashboardStats(userId: string) {
   };
 }
 
-export async function getResearchHistory(userId: string) {
+export async function getResearchHistory(organizationId: string) {
   const rows = await db
     .select({
       id: sessions.id,
@@ -84,7 +94,7 @@ export async function getResearchHistory(userId: string) {
     })
     .from(sessions)
     .leftJoin(messages, eq(messages.sessionId, sessions.id))
-    .where(eq(sessions.userId, userId))
+    .where(eq(sessions.organizationId, organizationId))
     .groupBy(sessions.id, sessions.title, sessions.createdAt)
     .orderBy(sql`max(${messages.createdAt}) desc nulls last`);
 
@@ -92,7 +102,7 @@ export async function getResearchHistory(userId: string) {
 }
 
 export async function getAnalyticsData(
-  userId: string,
+  organizationId: string,
   startDate: Date,
   endDate: Date
 ) {
@@ -128,7 +138,7 @@ export async function getAnalyticsData(
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
     .where(
       and(
-        eq(sessions.userId, userId),
+        eq(sessions.organizationId, organizationId),
         gte(messages.createdAt, startDate),
         lt(messages.createdAt, endExclusive)
       )
@@ -144,7 +154,7 @@ export async function getAnalyticsData(
     .innerJoin(messages, eq(messages.sessionId, sessions.id))
     .where(
       and(
-        eq(sessions.userId, userId),
+        eq(sessions.organizationId, organizationId),
         gte(messages.createdAt, startDate),
         lt(messages.createdAt, endExclusive)
       )
@@ -168,7 +178,7 @@ export async function getAnalyticsData(
   };
 }
 
-export async function getResearchReports(userId: string) {
+export async function getResearchReports(organizationId: string) {
   return db
     .select({
       id: messages.id,
@@ -180,6 +190,11 @@ export async function getResearchReports(userId: string) {
     })
     .from(messages)
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
-    .where(and(eq(sessions.userId, userId), isNotNull(messages.report)))
+    .where(
+      and(
+        eq(sessions.organizationId, organizationId),
+        isNotNull(messages.report)
+      )
+    )
     .orderBy(desc(messages.createdAt));
 }

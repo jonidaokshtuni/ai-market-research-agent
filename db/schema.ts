@@ -41,7 +41,8 @@ export const authSessions = pgTable(
   },
   (table) => [index("auth_sessions_user_id_idx").on(table.userId)]
 );
-//market research sessions
+
+// Market research sessions
 export const sessions = pgTable(
   "sessions",
   {
@@ -49,11 +50,18 @@ export const sessions = pgTable(
 
     userId: text("user_id"),
 
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+
     title: text("title").notNull(),
 
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [index("sessions_user_id_idx").on(table.userId)]
+  (table) => [
+    index("sessions_user_id_idx").on(table.userId),
+    index("sessions_organization_id_idx").on(table.organizationId),
+  ]
 );
 
 // messages
@@ -84,32 +92,30 @@ export const competitors = pgTable(
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
 
+    // Workspace ownership. Nullable to preserve existing records
+    // that cannot be safely assigned to a workspace.
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+
     name: text("name").notNull(),
-
     website: text("website"),
-
     industry: text("industry"),
-
     description: text("description"),
-
     products: text("products"),
-
     pricing: text("pricing"),
-
     strengths: text("strengths"),
-
     weaknesses: text("weaknesses"),
 
     marketStrength: integer("market_strength").default(50).notNull(),
-
     innovationScore: integer("innovation_score").default(50).notNull(),
 
     createdAt: timestamp("created_at").defaultNow().notNull(),
-
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     index("competitors_user_id_idx").on(table.userId),
+    index("competitors_organization_id_idx").on(table.organizationId),
     index("competitors_created_at_idx").on(table.createdAt),
   ]
 );
