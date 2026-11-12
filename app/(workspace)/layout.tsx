@@ -1,54 +1,38 @@
 import type { ReactNode } from "react";
 import { Suspense } from "react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
-import { ShieldCheck, Sparkles } from "lucide-react";
+import { desc, eq } from "drizzle-orm";
+import { LayoutDashboard } from "lucide-react";
 
+import { db } from "@/db";
+import { organizationJoinRequests } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getUserWorkspaces } from "@/lib/organizations/access";
 import WorkspaceNav from "@/components/dashboard/workspace-nav";
-import LogoutButton from "@/components/auth/logout-button";
+import UserMenu from "@/components/dashboard/user-menu";
 
-export const instant = false;
+type WorkspaceLayoutProps = {
+  children: ReactNode;
+};
 
-async function WorkspaceHeader({
-  user,
-}: {
-  user: {
-    name: string | null;
-    email: string;
-  };
-}) {
+function WorkspaceLoading() {
   return (
-    <header className="sticky top-0 z-20 flex min-h-[76px] items-center justify-between border-b border-white/[0.06] bg-[#0c1322]/95 px-5 backdrop-blur-xl sm:px-8">
-      <div>
-        <p className="text-xs font-medium text-slate-500">
-          MARKETINTEL / WORKSPACE
-        </p>
-        <p className="mt-1 text-sm font-semibold text-slate-200">
-          Market Research Dashboard
-        </p>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="hidden text-right sm:block">
-          <p className="text-sm font-medium text-slate-200">
-            {user.name || "Account"}
-          </p>
-          <p className="text-xs text-slate-500">{user.email}</p>
-        </div>
-
-        <LogoutButton />
-      </div>
-    </header>
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <p className="text-sm text-muted-foreground">Loading your workspace...</p>
+    </div>
   );
 }
 
-export default async function WorkspaceLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
+export default function WorkspaceLayout({ children }: WorkspaceLayoutProps) {
+  return (
+    <Suspense fallback={<WorkspaceLoading />}>
+      <WorkspaceContent>{children}</WorkspaceContent>
+    </Suspense>
+  );
+}
+
+async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
   await connection();
 
   const user = await getCurrentUser();
@@ -57,69 +41,90 @@ export default async function WorkspaceLayout({
     redirect("/login");
   }
 
+  const workspaces = await getUserWorkspaces(user.id);
+
+  if (workspaces.length === 0) {
+    const [latestJoinRequest] = await db
+      .select({
+        status: organizationJoinRequests.status,
+      })
+      .from(organizationJoinRequests)
+      .where(eq(organizationJoinRequests.userId, user.id))
+      .orderBy(desc(organizationJoinRequests.createdAt))
+      .limit(1);
+
+    if (
+      latestJoinRequest?.status === "pending" ||
+      latestJoinRequest?.status === "rejected"
+    ) {
+      redirect("/pending-approval");
+    }
+
+    redirect("/register");
+  }
+
+  const canManageMembers = workspaces.some(
+    (workspace) => workspace.role === "owner" || workspace.role === "admin"
+  );
+
+  const displayName = user.name?.trim() || user.email;
+
   return (
-    <div className="min-h-screen bg-[#080d19] text-white md:flex">
-      <aside className="flex w-full shrink-0 flex-col border-b border-white/[0.06] bg-[#0c1322] p-5 md:sticky md:top-0 md:h-screen md:w-[270px] md:border-b-0 md:border-r">
-        <Link href="/" className="flex items-center gap-3 px-2 py-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-indigo-950/50">
-            <Sparkles size={22} className="text-white" />
+    <div className="min-h-screen bg-background">
+      {/* Desktop sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-white/[0.07] bg-card md:flex">
+        <div className="flex h-20 items-center gap-3 border-b border-white/[0.07] px-6">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-950/30">
+            <LayoutDashboard className="h-5 w-5 text-white" />
           </div>
 
-          <div>
-            <h2 className="text-xl font-bold tracking-tight">
-              Market<span className="text-indigo-400">Intel</span>
-            </h2>
-            <p className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
-              Intelligence platform
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold tracking-tight text-foreground">
+              Market Intelligence
+            </p>
+            <p className="mt-0.5 text-[11px] font-medium tracking-wide text-muted-foreground">
+              RESEARCH PLATFORM
             </p>
           </div>
-        </Link>
-
-        <WorkspaceNav />
-
-        <div className="mt-8 hidden rounded-2xl border border-indigo-500/15 bg-gradient-to-br from-indigo-500/10 to-blue-500/[0.03] p-4 md:block">
-          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/15">
-            <Sparkles size={18} className="text-indigo-400" />
-          </div>
-
-          <h3 className="text-sm font-semibold text-white">
-            AI Research Assistant
-          </h3>
-
-          <p className="mt-2 text-xs leading-5 text-slate-400">
-            Turn market data into actionable business intelligence.
-          </p>
-
-          <Link
-            href="/dashboard/agent"
-            className="mt-4 flex items-center justify-center rounded-lg bg-indigo-500/15 px-3 py-2 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-500/25"
-          >
-            Start researching →
-          </Link>
         </div>
 
-        <div className="mt-auto hidden border-t border-white/[0.06] pt-5 md:block">
-          <div className="flex items-center gap-2 px-2 text-xs text-slate-500">
-            <ShieldCheck size={15} className="text-emerald-400" />
-            Secure workspace
-          </div>
+        <div className="flex-1 overflow-y-auto">
+          <WorkspaceNav canManageMembers={canManageMembers} />
+        </div>
 
-          <p className="mt-2 px-2 text-[10px] text-slate-600">
-            MarketIntel © 2026
+        <div className="border-t border-white/[0.07] px-5 py-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Workspace platform
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            Market research and insights
           </p>
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
-        <Suspense
-          fallback={
-            <header className="min-h-[76px] border-b border-white/[0.06] bg-[#0c1322]" />
-          }
-        >
-          <WorkspaceHeader user={user} />
-        </Suspense>
+      {/* Main content */}
+      <div className="min-w-0 md:pl-64">
+        <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b border-white/[0.07] bg-background/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold tracking-tight text-foreground">
+              Market Intelligence
+            </p>
+            <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">
+              Your research workspace
+            </p>
+          </div>
 
-        <main className="p-4 sm:p-6 lg:p-8">{children}</main>
+          <UserMenu name={displayName} email={user.email} />
+        </header>
+
+        {/* Mobile navigation */}
+        <div className="border-b border-white/[0.07] bg-card md:hidden">
+          <WorkspaceNav canManageMembers={canManageMembers} variant="mobile" />
+        </div>
+
+        <main className="min-h-[calc(100vh-8rem)] p-4 sm:p-6 lg:p-8">
+          <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+        </main>
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   boolean,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -293,5 +294,132 @@ export const competitorMonitoring = pgTable(
     index("competitor_monitoring_user_id_idx").on(table.userId),
 
     index("competitor_monitoring_due_idx").on(table.isEnabled, table.nextRunAt),
+  ]
+);
+
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    name: text("name").notNull(),
+
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("organizations_created_by_idx").on(table.createdBy)]
+);
+
+export const organizationMembers = pgTable(
+  "organization_members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    role: text("role")
+      .$type<"owner" | "admin" | "member">()
+      .notNull()
+      .default("member"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("organization_members_org_user_unique").on(
+      table.organizationId,
+      table.userId
+    ),
+    index("organization_members_organization_id_idx").on(table.organizationId),
+    index("organization_members_user_id_idx").on(table.userId),
+  ]
+);
+
+// Organization invitations
+export const organizationInvitations = pgTable(
+  "organization_invitations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+
+    email: text("email").notNull(),
+
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+
+    tokenHash: text("token_hash").notNull().unique(),
+
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    expiresAt: timestamp("expires_at").notNull(),
+
+    acceptedAt: timestamp("accepted_at"),
+
+    revokedAt: timestamp("revoked_at"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("organization_invitations_organization_id_idx").on(
+      table.organizationId
+    ),
+
+    index("organization_invitations_email_idx").on(table.email),
+
+    index("organization_invitations_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+// Requests to join an organization
+export const organizationJoinRequests = pgTable(
+  "organization_join_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    status: text("status")
+      .$type<"pending" | "approved" | "rejected">()
+      .notNull()
+      .default("pending"),
+
+    reviewedBy: uuid("reviewed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+
+    reviewedAt: timestamp("reviewed_at"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("organization_join_requests_organization_id_idx").on(
+      table.organizationId
+    ),
+
+    index("organization_join_requests_user_id_idx").on(table.userId),
+
+    index("organization_join_requests_status_idx").on(table.status),
+
+    uniqueIndex("organization_join_requests_pending_unique")
+      .on(table.organizationId, table.userId)
+      .where(sql`${table.status} = 'pending'`),
   ]
 );
