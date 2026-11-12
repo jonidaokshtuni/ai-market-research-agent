@@ -6,6 +6,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { competitors } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 import CompetitorResearchPanel from "@/components/dashboard/competitors/competitor-research-panel";
 
@@ -121,11 +122,19 @@ export default async function CompetitorProfilePage({
     notFound();
   }
 
-  // Only retrieve competitors belonging to the authenticated user.
+  // Resolve the active workspace and verify competitor access.
+  const workspace = await getActiveWorkspace(user.id);
+
+  if (!workspace) {
+    notFound();
+  }
+
   const [competitor] = await db
     .select()
     .from(competitors)
-    .where(and(eq(competitors.id, id), eq(competitors.userId, user.id)))
+    .where(
+      and(eq(competitors.id, id), eq(competitors.organizationId, workspace.id))
+    )
     .limit(1);
 
   if (!competitor) {

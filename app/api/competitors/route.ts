@@ -44,7 +44,14 @@ export async function GET() {
       .where(eq(competitors.organizationId, workspace.id))
       .orderBy(desc(competitors.createdAt));
 
-    return NextResponse.json({ competitors: results });
+    const competitorsWithPermissions = results.map((competitor) => ({
+      ...competitor,
+      canDelete: workspace.role !== "member" || competitor.userId === user.id,
+    }));
+
+    return NextResponse.json({
+      competitors: competitorsWithPermissions,
+    });
   } catch (error) {
     console.error("GET competitors error:", error);
 

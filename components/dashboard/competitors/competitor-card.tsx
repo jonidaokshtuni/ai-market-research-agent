@@ -229,21 +229,23 @@ export default function CompetitorCard({
             </button>
           </Tooltip>
 
-          <Tooltip content="Permanently remove this competitor from your list">
-            <button
-              type="button"
-              onClick={() => onDelete(competitor)}
-              disabled={isDeleting}
-              aria-label={`Delete ${competitor.name}`}
-              className="inline-flex size-10 items-center justify-center rounded-xl border border-rose-500/20 bg-rose-500/5 text-rose-400 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
-            >
-              {isDeleting ? (
-                <span className="size-4 animate-spin rounded-full border-2 border-rose-400/30 border-t-rose-400" />
-              ) : (
-                <Trash2 className="size-4" aria-hidden="true" />
-              )}
-            </button>
-          </Tooltip>
+          {competitor.canDelete && (
+            <Tooltip content="Permanently remove this competitor from the workspace">
+              <button
+                type="button"
+                onClick={() => onDelete(competitor)}
+                disabled={isDeleting}
+                aria-label={`Delete ${competitor.name}`}
+                className="inline-flex size-10 items-center justify-center rounded-xl border border-rose-500/20 bg-rose-500/5 text-rose-400 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+              >
+                {isDeleting ? (
+                  <span className="size-4 animate-spin rounded-full border-2 border-rose-400/30 border-t-rose-400" />
+                ) : (
+                  <Trash2 className="size-4" aria-hidden="true" />
+                )}
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
     </article>

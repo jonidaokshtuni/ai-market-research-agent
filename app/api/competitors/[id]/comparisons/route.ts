@@ -4,24 +4,32 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { competitors, competitorComparisons } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
 const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function GET(request: Request, { params }: RouteContext) {
   try {
-    // Authenticate the request.
     const user = await getCurrentUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Validate competitor ID.
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "No active workspace found" },
+        { status: 403 }
+      );
+    }
+
     const { id } = await params;
 
     if (!UUID_REGEX.test(id)) {
@@ -31,11 +39,15 @@ export async function GET(request: Request, { params }: RouteContext) {
       );
     }
 
-    // Verify that this competitor belongs to the current user.
     const [competitor] = await db
       .select({ id: competitors.id })
       .from(competitors)
-      .where(and(eq(competitors.id, id), eq(competitors.userId, user.id)))
+      .where(
+        and(
+          eq(competitors.id, id),
+          eq(competitors.organizationId, workspace.id)
+        )
+      )
       .limit(1);
 
     if (!competitor) {
@@ -45,7 +57,6 @@ export async function GET(request: Request, { params }: RouteContext) {
       );
     }
 
-    // Parse pagination parameters.
     const { searchParams } = new URL(request.url);
 
     const requestedLimit = Number(searchParams.get("limit"));
@@ -61,16 +72,10 @@ export async function GET(request: Request, { params }: RouteContext) {
         ? requestedOffset
         : 0;
 
-    // Retrieve comparison history.
     const results = await db
       .select()
       .from(competitorComparisons)
-      .where(
-        and(
-          eq(competitorComparisons.competitorId, id),
-          eq(competitorComparisons.userId, user.id)
-        )
-      )
+      .where(eq(competitorComparisons.competitorId, id))
       .orderBy(
         desc(competitorComparisons.createdAt),
         desc(competitorComparisons.id)

@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Competitor, CompetitorFormValues } from "./types";
+
+import Modal from "@/components/ui/modal";
+
 import CompetitorForm from "./competitor-form";
 import CompetitorList from "./competitor-list";
 import CompetitorSkeleton from "./competitor-skeleton";
-import Modal from "@/components/ui/modal";
+import type { Competitor, CompetitorFormValues } from "./types";
 
 type ApiError = {
   error?: string;
@@ -27,20 +29,16 @@ async function getErrorMessage(response: Response): Promise<string> {
 }
 
 function parseCompetitorsResponse(data: unknown): Competitor[] {
-  const result = Array.isArray(data)
-    ? data
-    : data &&
-      typeof data === "object" &&
-      "competitors" in data &&
-      Array.isArray(data.competitors)
-    ? data.competitors
-    : null;
-
-  if (!result) {
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !("competitors" in data) ||
+    !Array.isArray(data.competitors)
+  ) {
     throw new Error("The server returned an invalid competitors response.");
   }
 
-  return result as Competitor[];
+  return data.competitors as Competitor[];
 }
 
 export default function CompetitorManager() {
@@ -59,42 +57,68 @@ export default function CompetitorManager() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const loadCompetitors = useCallback(async (signal?: AbortSignal) => {
-    setIsLoading(true);
-    setError("");
-
-    try {
-      const response = await fetch("/api/competitors", {
-        method: "GET",
-        cache: "no-store",
-        signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(await getErrorMessage(response));
+  const loadCompetitors = useCallback(
+    async (
+      signal?: AbortSignal,
+      options?: { showLoading?: boolean }
+    ): Promise<boolean> => {
+      if (signal?.aborted) {
+        return false;
       }
 
-      const data: unknown = await response.json();
-
-      setCompetitors(parseCompetitorsResponse(data));
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return;
+      if (options?.showLoading !== false) {
+        setIsLoading(true);
       }
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load competitors. Please try again."
-      );
-    } finally {
-      if (!signal?.aborted) {
-        setIsLoading(false);
+      setError("");
+
+      try {
+        const response = await fetch("/api/competitors", {
+          method: "GET",
+          cache: "no-store",
+          signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(await getErrorMessage(response));
+        }
+
+        const data: unknown = await response.json();
+        const results = parseCompetitorsResponse(data);
+
+        if (signal?.aborted) {
+          return false;
+        }
+
+        setCompetitors(results);
+        return true;
+      } catch (err) {
+        if (
+          signal?.aborted ||
+          (err instanceof Error && err.name === "AbortError")
+        ) {
+          return false;
+        }
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load competitors. Please try again."
+        );
+
+        return false;
+      } finally {
+        if (!signal?.aborted && options?.showLoading !== false) {
+          setIsLoading(false);
+        }
       }
-    }
-  }, []);
+    },
+    []
+  );
 
   // Initial data loading.
+  // Fetch directly here instead of calling loadCompetitors,
+  // which updates state synchronously before starting its request.
   useEffect(() => {
     const controller = new AbortController();
 
@@ -111,9 +135,10 @@ export default function CompetitorManager() {
         }
 
         const data: unknown = await response.json();
+        const results = parseCompetitorsResponse(data);
 
         if (!controller.signal.aborted) {
-          setCompetitors(parseCompetitorsResponse(data));
+          setCompetitors(results);
         }
       } catch (err) {
         if (controller.signal.aborted) {
@@ -152,13 +177,19 @@ export default function CompetitorManager() {
   }
 
   function closeForm() {
-    if (isSaving) return;
+    if (isSaving) {
+      return;
+    }
 
     setIsFormOpen(false);
     setSelectedCompetitor(null);
   }
 
   async function handleSubmit(values: CompetitorFormValues) {
+    if (isSaving) {
+      return;
+    }
+
     setIsSaving(true);
     setError("");
     setSuccess("");
@@ -183,16 +214,24 @@ export default function CompetitorManager() {
         throw new Error(await getErrorMessage(response));
       }
 
-      await loadCompetitors();
-
       setIsFormOpen(false);
       setSelectedCompetitor(null);
 
-      setSuccess(
-        isEditing
-          ? "Competitor updated successfully."
-          : "Competitor added successfully."
-      );
+      const refreshed = await loadCompetitors(undefined, {
+        showLoading: false,
+      });
+
+      if (refreshed) {
+        setSuccess(
+          isEditing
+            ? "Competitor updated successfully."
+            : "Competitor added successfully."
+        );
+      } else {
+        setError(
+          "The competitor was saved, but the list could not be refreshed. Please reload the page."
+        );
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -205,9 +244,17 @@ export default function CompetitorManager() {
   }
 
   async function handleDelete() {
-    if (!competitorToDelete || deletingId) return;
+    if (!competitorToDelete || deletingId) {
+      return;
+    }
 
     const competitor = competitorToDelete;
+
+    if (!competitor.canDelete) {
+      setCompetitorToDelete(null);
+      setError("You do not have permission to delete this competitor.");
+      return;
+    }
 
     setDeletingId(competitor.id);
     setError("");
@@ -241,10 +288,11 @@ export default function CompetitorManager() {
 
   return (
     <div className="space-y-7">
-      {/* Page actions */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-white">Your competitors</h2>
+          <h2 className="text-lg font-semibold text-white">
+            Workspace competitors
+          </h2>
 
           <p className="mt-1 text-sm text-slate-400">
             Manage and compare companies in your competitive landscape.
@@ -265,7 +313,6 @@ export default function CompetitorManager() {
         )}
       </div>
 
-      {/* Notifications */}
       {error && (
         <div
           role="alert"
@@ -301,7 +348,6 @@ export default function CompetitorManager() {
         </div>
       )}
 
-      {/* Competitor form */}
       {isFormOpen && (
         <Modal
           isOpen={isFormOpen}
@@ -320,7 +366,6 @@ export default function CompetitorManager() {
         </Modal>
       )}
 
-      {/* Competitor collection */}
       {isLoading ? (
         <CompetitorSkeleton count={6} />
       ) : (
@@ -332,7 +377,6 @@ export default function CompetitorManager() {
         />
       )}
 
-      {/* Delete confirmation dialog */}
       {competitorToDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
