@@ -1,13 +1,26 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Send, Loader2, ShieldCheck, UserPlus } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Loader2,
+  Send,
+  ShieldCheck,
+  UserPlus,
+} from "lucide-react";
 
 import Modal from "@/components/ui/modal";
 import type { ManageableWorkspace } from "@/lib/organizations/access";
 
 type WorkspaceInvitationFormProps = {
   workspaces: ManageableWorkspace[];
+};
+
+type InvitationResponse = {
+  message?: string;
+  error?: string;
+  invitationUrl?: string;
 };
 
 export default function WorkspaceInvitationForm({
@@ -20,6 +33,9 @@ export default function WorkspaceInvitationForm({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [invitationUrl, setInvitationUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
 
   const selectedWorkspace = workspaces.find(
     (workspace) => workspace.id === organizationId
@@ -27,21 +43,52 @@ export default function WorkspaceInvitationForm({
 
   const canInviteAdmins = selectedWorkspace?.role === "owner";
 
-  function openModal() {
+  function resetFeedback() {
     setError("");
     setMessage("");
+    setInvitationUrl("");
+    setCopied(false);
+    setCopyError("");
+  }
+
+  function openModal() {
+    resetFeedback();
     setIsOpen(true);
   }
 
   function closeModal() {
     if (loading) return;
+
     setIsOpen(false);
+    resetFeedback();
+    setEmail("");
+    setRole("member");
+  }
+
+  async function handleCopyInvitationLink() {
+    if (!invitationUrl) return;
+
+    setCopyError("");
+    setCopied(false);
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard access is unavailable.");
+      }
+
+      await navigator.clipboard.writeText(invitationUrl);
+      setCopied(true);
+    } catch {
+      setCopyError(
+        "Unable to copy automatically. Please select and copy the invitation link manually."
+      );
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
-    setError("");
+
+    resetFeedback();
 
     if (!organizationId || !email.trim()) {
       setError("Please select a workspace and enter an email address.");
@@ -63,18 +110,36 @@ export default function WorkspaceInvitationForm({
         }),
       });
 
-      const data = await response.json();
+      let data: InvitationResponse;
+
+      try {
+        data = (await response.json()) as InvitationResponse;
+      } catch {
+        throw new Error("The server returned an invalid response.");
+      }
 
       if (!response.ok) {
-        setError(data.error || "Unable to send the invitation.");
+        setError(data.error || "Unable to send the invitation email.");
         return;
       }
 
-      setMessage(data.message || "Invitation sent successfully.");
+      if (typeof data.invitationUrl !== "string" || !data.invitationUrl) {
+        setError(
+          "The invitation email was processed, but the invitation link was not returned."
+        );
+        return;
+      }
+
+      setMessage(data.message || `Invitation email sent to ${email.trim()}.`);
+      setInvitationUrl(data.invitationUrl);
       setEmail("");
       setRole("member");
-    } catch {
-      setError("Unable to connect. Please try again.");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to connect. Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -115,7 +180,8 @@ export default function WorkspaceInvitationForm({
                 setRole("member");
               }}
               required
-              className="w-full rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              disabled={loading}
+              className="w-full rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50"
             >
               {workspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
@@ -140,9 +206,10 @@ export default function WorkspaceInvitationForm({
               required
               maxLength={254}
               value={email}
+              disabled={loading}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="colleague@example.com"
-              className="w-full rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="w-full rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50"
             />
           </div>
 
@@ -157,10 +224,11 @@ export default function WorkspaceInvitationForm({
             <select
               id="invitation-role"
               value={role}
+              disabled={loading}
               onChange={(event) =>
                 setRole(event.target.value as "member" | "admin")
               }
-              className="w-full rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="w-full rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50"
             >
               <option value="member">Member</option>
               {canInviteAdmins && <option value="admin">Admin</option>}
@@ -183,12 +251,57 @@ export default function WorkspaceInvitationForm({
           )}
 
           {message && (
-            <p
+            <div
               role="status"
-              className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-400"
+              className="space-y-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-3"
             >
-              {message}
-            </p>
+              <p className="flex items-center gap-2 text-sm text-emerald-400">
+                <Check size={16} className="shrink-0" />
+                {message}
+              </p>
+
+              {invitationUrl && (
+                <div className="space-y-2">
+                  <label
+                    htmlFor="invitation-url"
+                    className="block text-xs font-medium text-slate-400"
+                  >
+                    Invitation link
+                  </label>
+
+                  <input
+                    id="invitation-url"
+                    type="text"
+                    readOnly
+                    value={invitationUrl}
+                    onFocus={(event) => event.target.select()}
+                    className="w-full rounded-lg border border-white/10 bg-gray-950 px-3 py-2.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={handleCopyInvitationLink}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-sm font-medium text-blue-400 transition hover:bg-blue-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  >
+                    {copied ? (
+                      <>
+                        <Check size={16} />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={16} />
+                        Copy invitation link
+                      </>
+                    )}
+                  </button>
+
+                  {copyError && (
+                    <p className="text-xs text-amber-400">{copyError}</p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           <div className="flex flex-col gap-4 border-t border-white/[0.08] pt-5">

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { createHash, randomBytes } from "crypto";
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 import { db } from "@/db";
 import {
@@ -19,39 +19,32 @@ function hashToken(token: string): string {
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+
+    return entities[character];
+  });
 }
 
 async function revokeInvitation(invitationId: string) {
-  try {
-    await db
-      .update(organizationInvitations)
-      .set({ revokedAt: new Date() })
-      .where(eq(organizationInvitations.id, invitationId));
-  } catch (cleanupError) {
-    console.error("Failed to revoke undelivered invitation:", cleanupError);
-  }
+  await db
+    .update(organizationInvitations)
+    .set({ revokedAt: new Date() })
+    .where(eq(organizationInvitations.id, invitationId));
 }
 
-/**
- * GET /api/organizations/invitations
- *
- * Returns pending invitations addressed to the authenticated user.
- */
 export async function GET() {
   try {
     const currentUser = await getCurrentUser();
 
     if (!currentUser) {
-      return NextResponse.json(
-        { error: "Authentication required." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
     const invitations = await db
@@ -61,8 +54,11 @@ export async function GET() {
         role: organizationInvitations.role,
         expiresAt: organizationInvitations.expiresAt,
         createdAt: organizationInvitations.createdAt,
-        workspaceName: organizations.name,
-        inviterName: users.name,
+        acceptedAt: organizationInvitations.acceptedAt,
+        revokedAt: organizationInvitations.revokedAt,
+        organizationId: organizationInvitations.organizationId,
+        organizationName: organizations.name,
+        invitedByName: users.name,
       })
       .from(organizationInvitations)
       .innerJoin(
@@ -72,7 +68,10 @@ export async function GET() {
       .leftJoin(users, eq(organizationInvitations.invitedBy, users.id))
       .where(
         and(
-          sql`LOWER(${organizationInvitations.email}) = LOWER(${currentUser.email})`,
+          eq(
+            sql`lower(${organizationInvitations.email})`,
+            currentUser.email.toLowerCase()
+          ),
           isNull(organizationInvitations.acceptedAt),
           isNull(organizationInvitations.revokedAt),
           gt(organizationInvitations.expiresAt, new Date())
@@ -83,55 +82,40 @@ export async function GET() {
     return NextResponse.json(
       { invitations },
       {
-        status: 200,
         headers: {
           "Cache-Control": "no-store",
         },
       }
     );
   } catch (error) {
-    console.error("Get pending organization invitations error:", error);
+    console.error("Failed to fetch workspace invitations:", error);
 
     return NextResponse.json(
-      { error: "Something went wrong while loading invitations." },
+      { error: "Unable to fetch invitations." },
       { status: 500 }
     );
   }
 }
 
-/**
- * POST /api/organizations/invitations
- *
- * Creates and sends a workspace invitation.
- */
 export async function POST(request: Request) {
-  let invitationId: string | undefined;
+  let createdInvitationId: string | null = null;
+  let emailDeliveryFailed = false;
 
   try {
-    // 1. Require authentication.
     const currentUser = await getCurrentUser();
 
     if (!currentUser) {
-      return NextResponse.json(
-        { error: "Authentication required." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    // 2. Determine whether local email preview mode is enabled.
-    // Preview mode is deliberately impossible in production.
-    const isEmailPreview =
-      process.env.NODE_ENV !== "production" &&
-      process.env.EMAIL_PREVIEW === "true";
-
-    // 3. Validate application URL.
-    const appUrl = process.env.APP_URL?.trim();
+    // Validate application URL.
+    const appUrl = process.env.APP_URL;
 
     if (!appUrl) {
       console.error("APP_URL environment variable is missing.");
 
       return NextResponse.json(
-        { error: "Invitation service is not configured." },
+        { error: "Application URL is not configured." },
         { status: 500 }
       );
     }
@@ -141,71 +125,68 @@ export async function POST(request: Request) {
     try {
       parsedAppUrl = new URL(appUrl);
     } catch {
+      console.error("APP_URL environment variable is invalid.");
+
       return NextResponse.json(
-        { error: "Invalid application URL configuration." },
+        { error: "Application URL is not configured correctly." },
         { status: 500 }
       );
     }
 
     if (
       parsedAppUrl.protocol !== "https:" &&
-      parsedAppUrl.protocol !== "http:"
+      parsedAppUrl.hostname !== "localhost"
     ) {
       return NextResponse.json(
-        { error: "Invalid application URL configuration." },
+        { error: "Application URL must use HTTPS." },
         { status: 500 }
       );
     }
 
-    // 4. Validate email service configuration when not previewing.
-    const apiKey = process.env.RESEND_API_KEY;
+    // Validate Gmail SMTP configuration before creating an invitation.
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = Number(process.env.SMTP_PORT ?? "465");
+    const smtpSecure = process.env.SMTP_SECURE === "true";
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPassword = process.env.SMTP_PASSWORD;
     const emailFrom = process.env.EMAIL_FROM;
 
-    if (!isEmailPreview && (!apiKey || !emailFrom)) {
-      console.error("Invitation email environment variables are missing.");
+    if (
+      !smtpHost ||
+      !Number.isInteger(smtpPort) ||
+      smtpPort < 1 ||
+      smtpPort > 65535 ||
+      !smtpSecure ||
+      !smtpUser ||
+      !smtpPassword ||
+      !emailFrom
+    ) {
+      console.error("Gmail SMTP environment variables are missing or invalid.");
 
       return NextResponse.json(
-        { error: "Invitation email service is not configured." },
+        { error: "Email service is not configured correctly." },
         { status: 500 }
       );
     }
 
-    // 5. Validate request body.
-    let body: unknown;
-
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid JSON request body." },
-        { status: 400 }
-      );
-    }
-
-    if (!body || typeof body !== "object") {
-      return NextResponse.json(
-        { error: "Invalid request body." },
-        { status: 400 }
-      );
-    }
-
-    const data = body as Record<string, unknown>;
+    const body = await request.json();
 
     const organizationId =
-      typeof data.organizationId === "string" ? data.organizationId.trim() : "";
+      typeof body.organizationId === "string" ? body.organizationId : "";
 
     const email =
-      typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
+      typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
 
-    const role = data.role ?? "member";
+    const role = body.role === "admin" ? "admin" : "member";
 
     if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      !organizationId ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         organizationId
       )
     ) {
       return NextResponse.json(
-        { error: "A valid workspace ID is required." },
+        { error: "Please select a valid workspace." },
         { status: 400 }
       );
     }
@@ -216,19 +197,12 @@ export async function POST(request: Request) {
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     ) {
       return NextResponse.json(
-        { error: "Please provide a valid email address." },
+        { error: "Please enter a valid email address." },
         { status: 400 }
       );
     }
 
-    if (role !== "admin" && role !== "member") {
-      return NextResponse.json(
-        { error: "Invalid invitation role." },
-        { status: 400 }
-      );
-    }
-
-    // 6. Verify workspace membership.
+    // Verify workspace membership and permissions.
     const [membership] = await db
       .select({
         role: organizationMembers.role,
@@ -249,7 +223,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 7. Enforce invitation permissions.
     if (membership.role !== "owner" && membership.role !== "admin") {
       return NextResponse.json(
         { error: "You do not have permission to invite members." },
@@ -257,7 +230,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (membership.role === "admin" && role === "admin") {
+    if (role === "admin" && membership.role !== "owner") {
       return NextResponse.json(
         {
           error: "Only workspace owners can invite administrators.",
@@ -266,16 +239,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // 8. Prevent inviting existing workspace members.
+    // Prevent inviting someone who is already a workspace member.
     const [existingUser] = await db
-      .select({ id: users.id })
+      .select({
+        id: users.id,
+      })
       .from(users)
-      .where(eq(users.email, email))
+      .where(eq(sql`lower(${users.email})`, email))
       .limit(1);
 
     if (existingUser) {
       const [existingMembership] = await db
-        .select({ id: organizationMembers.id })
+        .select({
+          id: organizationMembers.id,
+        })
         .from(organizationMembers)
         .where(
           and(
@@ -287,25 +264,27 @@ export async function POST(request: Request) {
 
       if (existingMembership) {
         return NextResponse.json(
-          { error: "This user is already a workspace member." },
+          {
+            error: "This user is already a member of the workspace.",
+          },
           { status: 409 }
         );
       }
     }
 
-    // 9. Prevent duplicate active invitations.
-    const now = new Date();
-
+    // Prevent duplicate active invitations.
     const [existingInvitation] = await db
-      .select({ id: organizationInvitations.id })
+      .select({
+        id: organizationInvitations.id,
+      })
       .from(organizationInvitations)
       .where(
         and(
           eq(organizationInvitations.organizationId, organizationId),
-          eq(organizationInvitations.email, email),
+          eq(sql`lower(${organizationInvitations.email})`, email),
           isNull(organizationInvitations.acceptedAt),
           isNull(organizationInvitations.revokedAt),
-          gt(organizationInvitations.expiresAt, now)
+          gt(organizationInvitations.expiresAt, new Date())
         )
       )
       .limit(1);
@@ -319,17 +298,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // 10. Load workspace and inviter details.
     const [organization] = await db
-      .select({ name: organizations.name })
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+      })
       .from(organizations)
       .where(eq(organizations.id, organizationId))
-      .limit(1);
-
-    const [inviter] = await db
-      .select({ name: users.name })
-      .from(users)
-      .where(eq(users.id, currentUser.id))
       .limit(1);
 
     if (!organization) {
@@ -339,7 +314,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 11. Generate a secure invitation token.
+    // Generate a cryptographically secure invitation token.
     const token = randomBytes(32).toString("hex");
     const tokenHash = hashToken(token);
 
@@ -347,7 +322,6 @@ export async function POST(request: Request) {
       Date.now() + INVITATION_DURATION_DAYS * 24 * 60 * 60 * 1000
     );
 
-    // Store only the token hash in the database.
     const [invitation] = await db
       .insert(organizationInvitations)
       .values({
@@ -360,154 +334,127 @@ export async function POST(request: Request) {
       })
       .returning({
         id: organizationInvitations.id,
+        email: organizationInvitations.email,
+        role: organizationInvitations.role,
         expiresAt: organizationInvitations.expiresAt,
       });
 
-    invitationId = invitation.id;
+    if (!invitation) {
+      throw new Error("Failed to create workspace invitation.");
+    }
 
-    // 12. Build the invitation URL.
+    createdInvitationId = invitation.id;
+
+    // Build the registration URL.
     const invitationUrl = new URL("/register", parsedAppUrl);
     invitationUrl.searchParams.set("invite", token);
 
-    const safeRole = role === "admin" ? "administrator" : "member";
+    const safeOrganizationName = escapeHtml(organization.name);
+    const safeEmail = escapeHtml(email);
+    const safeInvitationUrl = escapeHtml(invitationUrl.toString());
+    const safeRole = escapeHtml(role);
+    const expirationDate = expiresAt.toUTCString();
 
-    // 13. Local development preview: display the URL in the server terminal.
-    if (isEmailPreview) {
-      console.info(
-        [
-          "",
-          "========== INVITATION EMAIL PREVIEW ==========",
-          `To: ${email}`,
-          `Workspace: ${organization.name}`,
-          `Role: ${safeRole}`,
-          `Invitation URL: ${invitationUrl.toString()}`,
-          `Expires: ${expiresAt.toISOString()}`,
-          "==============================================",
-          "",
-        ].join("\n")
-      );
-
-      return NextResponse.json(
-        {
-          message: `Development invitation created for ${email}. Check your terminal for the invitation link.`,
-          invitation: {
-            id: invitation.id,
-            email,
-            role,
-            expiresAt: invitation.expiresAt,
-          },
-        },
-        { status: 201 }
-      );
-    }
-
-    // 14. Prepare the real invitation email.
-    const workspaceName = escapeHtml(organization.name);
-    const inviterName = escapeHtml(
-      inviter?.name || "A workspace administrator"
-    );
-
-    const formattedExpiry = expiresAt.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
+    // Create a Gmail SMTP transporter.
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpSecure,
+      auth: {
+        user: smtpUser,
+        pass: smtpPassword,
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     });
 
-    const emailSubject = `You've been invited to join ${organization.name}`;
-
-    const emailHtml = `
-      <div style="background-color:#f4f4f5;padding:40px 16px;font-family:Arial,sans-serif;">
-        <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;padding:40px 32px;">
-          <h1 style="font-size:24px;color:#18181b;margin:0 0 24px;">
-            You're invited!
-          </h1>
-
-          <p style="font-size:15px;line-height:1.7;color:#3f3f46;">
-            ${inviterName} has invited you to join
-            <strong>${workspaceName}</strong>
-            as a workspace ${safeRole}.
-          </p>
-
-          <p style="font-size:15px;line-height:1.7;color:#3f3f46;">
-            Accept your invitation to get started with your workspace.
-          </p>
-
-          <div style="margin:32px 0;">
-            <a
-              href="${invitationUrl.toString()}"
-              style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:8px;font-weight:600;"
-            >
-              Accept invitation
-            </a>
-          </div>
-
-          <p style="font-size:13px;color:#71717a;line-height:1.6;">
-            This invitation expires on ${formattedExpiry}.
-          </p>
-
-          <p style="font-size:13px;color:#71717a;line-height:1.6;">
-            If you weren't expecting this invitation, you can safely ignore this email.
-          </p>
-        </div>
-      </div>
-    `;
-
-    const emailText = `
-You're invited!
-
-${inviter?.name || "A workspace administrator"} has invited you to join ${
-      organization.name
-    } as a workspace ${safeRole}.
-
-Accept your invitation here:
-${invitationUrl.toString()}
-
-This invitation expires on ${formattedExpiry}.
-
-If you weren't expecting this invitation, you can safely ignore this email.
-    `.trim();
-
-    // 15. Send the invitation email through Resend.
+    // Send the invitation email.
     try {
-      const resend = new Resend(apiKey!);
-
-      const { error: emailError } = await resend.emails.send({
-        from: emailFrom!,
+      await transporter.sendMail({
+        from: emailFrom,
         to: email,
-        subject: emailSubject,
-        html: emailHtml,
-        text: emailText,
+        subject: `You're invited to join ${organization.name} on AI Market Agent`,
+        text: [
+          `You've been invited to join ${organization.name} on AI Market Agent.`,
+          "",
+          `Invitation role: ${role}`,
+          "",
+          "Accept your invitation using this link:",
+          invitationUrl.toString(),
+          "",
+          `This invitation expires on ${expirationDate}.`,
+          "",
+          "If you weren't expecting this invitation, you can ignore this email.",
+        ].join("\n"),
+        html: `
+          <!DOCTYPE html>
+          <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>Workspace invitation</title>
+            </head>
+            <body style="margin:0;padding:32px 16px;background-color:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+              <div style="max-width:560px;margin:0 auto;background-color:#ffffff;border-radius:16px;padding:36px 28px;">
+                <h1 style="margin:0 0 16px;font-size:25px;color:#0f172a;">
+                  You're invited!
+                </h1>
+
+                <p style="font-size:15px;line-height:1.7;color:#475569;">
+                  You've been invited to join
+                  <strong>${safeOrganizationName}</strong>
+                  on AI Market Agent.
+                </p>
+
+                <p style="font-size:14px;line-height:1.7;color:#475569;">
+                  Your workspace role:
+                  <strong>${safeRole}</strong>
+                </p>
+
+                <div style="margin:28px 0;text-align:center;">
+                  <a
+                    href="${safeInvitationUrl}"
+                    style="display:inline-block;padding:14px 24px;background-color:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;font-size:15px;font-weight:bold;"
+                  >
+                    Accept invitation
+                  </a>
+                </div>
+
+                <p style="font-size:13px;line-height:1.7;color:#64748b;">
+                  This invitation was sent to ${safeEmail} and expires on
+                  ${expirationDate}.
+                </p>
+
+                <p style="font-size:13px;line-height:1.7;color:#64748b;">
+                  If the button doesn't work, copy and paste this link into your browser:
+                </p>
+
+                <p style="font-size:12px;line-height:1.6;word-break:break-all;">
+                  <a href="${safeInvitationUrl}" style="color:#2563eb;">
+                    ${safeInvitationUrl}
+                  </a>
+                </p>
+
+                <hr style="margin:28px 0;border:0;border-top:1px solid #e2e8f0;" />
+
+                <p style="margin:0;font-size:12px;color:#94a3b8;">
+                  If you weren't expecting this invitation, you can safely ignore this email.
+                </p>
+              </div>
+            </body>
+          </html>
+        `,
       });
-
-      if (emailError) {
-        console.error("Resend invitation email error:", emailError);
-        await revokeInvitation(invitation.id);
-
-        return NextResponse.json(
-          {
-            error:
-              "The invitation email could not be sent. Please try again later.",
-          },
-          { status: 502 }
-        );
-      }
     } catch (emailError) {
-      console.error("Resend invitation email exception:", emailError);
-      await revokeInvitation(invitation.id);
-
-      return NextResponse.json(
-        {
-          error:
-            "The invitation email could not be sent. Please try again later.",
-        },
-        { status: 502 }
-      );
+      emailDeliveryFailed = true;
+      throw emailError;
     }
 
-    // 16. Return confirmation without exposing the invitation token.
     return NextResponse.json(
       {
-        message: `Invitation email sent successfully to ${email}.`,
+        message: `Invitation email sent to ${email}.`,
+        invitationUrl: invitationUrl.toString(),
         invitation: {
           id: invitation.id,
           email,
@@ -515,19 +462,41 @@ If you weren't expecting this invitation, you can safely ignore this email.
           expiresAt: invitation.expiresAt,
         },
       },
-      { status: 201 }
+      {
+        status: 201,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
     );
   } catch (error) {
-    console.error("Create organization invitation error:", error);
-
-    if (invitationId) {
-      await revokeInvitation(invitationId);
+    if (createdInvitationId) {
+      try {
+        await revokeInvitation(createdInvitationId);
+      } catch (revokeError) {
+        console.error(
+          "Failed to revoke invitation after an error:",
+          revokeError
+        );
+      }
     }
 
+    if (emailDeliveryFailed) {
+      console.error("Workspace invitation email delivery failed:", error);
+
+      return NextResponse.json(
+        {
+          error:
+            "The invitation was created but the email could not be sent. Please check your email configuration and try again.",
+        },
+        { status: 502 }
+      );
+    }
+
+    console.error("Failed to create workspace invitation:", error);
+
     return NextResponse.json(
-      {
-        error: "Something went wrong while creating the invitation.",
-      },
+      { error: "Unable to create the invitation." },
       { status: 500 }
     );
   }
