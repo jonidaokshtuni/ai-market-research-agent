@@ -363,19 +363,29 @@ export default function CompetitorResearchPanel({
   const [error, setError] = useState<string | null>(null);
 
   const fetchSnapshots = useCallback(
-    async (offset = 0, append = false) => {
+    async (
+      offset = 0,
+      append = false,
+      showLoading = true,
+      signal?: AbortSignal
+    ) => {
       try {
-        if (append) {
-          setIsLoadingMore(true);
-        } else {
-          setIsLoading(true);
-        }
+        // Defer state updates until after the effect's synchronous execution.
+        await Promise.resolve();
 
-        setError(null);
+        if (signal?.aborted) return;
+
+        if (showLoading) {
+          if (append) {
+            setIsLoadingMore(true);
+          } else {
+            setIsLoading(true);
+          }
+        }
 
         const response = await fetch(
           `/api/competitors/${competitorId}/snapshots?limit=10&offset=${offset}`,
-          { cache: "no-store" }
+          { cache: "no-store", signal }
         );
 
         const data = await response.json();
@@ -384,7 +394,11 @@ export default function CompetitorResearchPanel({
           throw new Error(data.error || "Failed to load research history.");
         }
 
+        if (signal?.aborted) return;
+
         const newSnapshots = data.snapshots as CompetitorSnapshot[];
+
+        setError(null);
 
         setSnapshots((previous) =>
           append ? [...previous, ...newSnapshots] : newSnapshots
@@ -392,52 +406,81 @@ export default function CompetitorResearchPanel({
 
         setPagination(data.pagination as Pagination);
       } catch (error) {
+        if (signal?.aborted) return;
+
         setError(
           error instanceof Error
             ? error.message
             : "Something went wrong while loading research."
         );
       } finally {
-        setIsLoading(false);
-        setIsLoadingMore(false);
+        if (!signal?.aborted) {
+          setIsLoading(false);
+          setIsLoadingMore(false);
+        }
       }
     },
     [competitorId]
   );
 
-  const fetchComparisons = useCallback(async () => {
-    try {
-      setIsLoadingComparisons(true);
-      setComparisonError(null);
+  const fetchComparisons = useCallback(
+    async (showLoading = true, signal?: AbortSignal) => {
+      try {
+        // Defer state updates until after the effect's synchronous execution.
+        await Promise.resolve();
 
-      const response = await fetch(
-        `/api/competitors/${competitorId}/comparisons?limit=20&offset=0`,
-        { cache: "no-store" }
-      );
+        if (signal?.aborted) return;
 
-      const data = await response.json();
+        if (showLoading) {
+          setIsLoadingComparisons(true);
+        }
 
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Failed to load competitor change history."
+        const response = await fetch(
+          `/api/competitors/${competitorId}/comparisons?limit=20&offset=0`,
+          { cache: "no-store", signal }
         );
-      }
 
-      setComparisons(data.comparisons as CompetitorComparison[]);
-    } catch (error) {
-      setComparisonError(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong while loading change history."
-      );
-    } finally {
-      setIsLoadingComparisons(false);
-    }
-  }, [competitorId]);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.error || "Failed to load competitor change history."
+          );
+        }
+
+        if (signal?.aborted) return;
+
+        setComparisonError(null);
+        setComparisons(data.comparisons as CompetitorComparison[]);
+      } catch (error) {
+        if (signal?.aborted) return;
+
+        setComparisonError(
+          error instanceof Error
+            ? error.message
+            : "Something went wrong while loading change history."
+        );
+      } finally {
+        if (!signal?.aborted) {
+          setIsLoadingComparisons(false);
+        }
+      }
+    },
+    [competitorId]
+  );
 
   useEffect(() => {
-    void fetchSnapshots();
-    void fetchComparisons();
+    const controller = new AbortController();
+
+    const timeoutId = window.setTimeout(() => {
+      void fetchSnapshots(0, false, false, controller.signal);
+      void fetchComparisons(false, controller.signal);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [fetchSnapshots, fetchComparisons]);
 
   const handleResearch = async () => {
@@ -460,6 +503,10 @@ export default function CompetitorResearchPanel({
         );
       }
 
+      setIsLoading(true);
+      setIsLoadingComparisons(true);
+      setComparisonError(null);
+
       // Refresh both research snapshots and detected changes.
       await Promise.all([fetchSnapshots(), fetchComparisons()]);
     } catch (error) {
@@ -471,6 +518,24 @@ export default function CompetitorResearchPanel({
     } finally {
       setIsResearching(false);
     }
+  };
+
+  const handleRefreshComparisons = () => {
+    setIsLoadingComparisons(true);
+    setComparisonError(null);
+    void fetchComparisons(false);
+  };
+
+  const handleLoadMore = () => {
+    if (
+      pagination?.nextOffset === null ||
+      pagination?.nextOffset === undefined
+    ) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    void fetchSnapshots(pagination.nextOffset, true, false);
   };
 
   const latestSnapshot = snapshots[0];
@@ -724,7 +789,7 @@ export default function CompetitorResearchPanel({
 
           <button
             type="button"
-            onClick={fetchComparisons}
+            onClick={handleRefreshComparisons}
             disabled={isLoadingComparisons}
             aria-label="Refresh competitor change history"
             className="inline-flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-2 text-xs font-medium text-slate-400 transition hover:border-blue-500/30 hover:text-white disabled:opacity-50"
@@ -750,7 +815,7 @@ export default function CompetitorResearchPanel({
 
               <button
                 type="button"
-                onClick={fetchComparisons}
+                onClick={handleRefreshComparisons}
                 className="mt-2 text-xs font-medium text-blue-400 hover:text-blue-300"
               >
                 Try again
@@ -895,10 +960,7 @@ export default function CompetitorResearchPanel({
         {pagination?.hasMore && (
           <button
             type="button"
-            onClick={() =>
-              pagination.nextOffset !== null &&
-              fetchSnapshots(pagination.nextOffset, true)
-            }
+            onClick={handleLoadMore}
             disabled={isLoadingMore}
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-blue-500/30 hover:bg-blue-500/5 disabled:opacity-50"
           >

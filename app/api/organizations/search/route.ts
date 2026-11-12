@@ -5,24 +5,24 @@ import { db } from "@/db";
 import { organizations } from "@/db/schema";
 
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const query = url.searchParams.get("q")?.trim() ?? "";
+
+  if (query.length < 2) {
+    return NextResponse.json(
+      { error: "Enter at least 2 characters to search." },
+      { status: 400 }
+    );
+  }
+
+  if (query.length > 80) {
+    return NextResponse.json(
+      { error: "Search query is too long." },
+      { status: 400 }
+    );
+  }
+
   try {
-    const url = new URL(request.url);
-    const query = url.searchParams.get("q")?.trim() ?? "";
-
-    if (query.length < 2) {
-      return NextResponse.json(
-        { error: "Enter at least 2 characters to search." },
-        { status: 400 }
-      );
-    }
-
-    if (query.length > 80) {
-      return NextResponse.json(
-        { error: "Search query is too long." },
-        { status: 400 }
-      );
-    }
-
     const escapedQuery = query.replace(/[\\%_]/g, "\\$&");
 
     const workspaces = await db

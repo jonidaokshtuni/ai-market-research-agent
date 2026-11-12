@@ -10,17 +10,17 @@ function hashToken(token: string): string {
 }
 
 export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const token = searchParams.get("token")?.trim() ?? "";
+
+  if (!/^[a-f0-9]{64}$/i.test(token)) {
+    return NextResponse.json(
+      { error: "Invalid or expired invitation." },
+      { status: 400 }
+    );
+  }
+
   try {
-    const { searchParams } = new URL(request.url);
-    const token = searchParams.get("token")?.trim() ?? "";
-
-    if (!/^[a-f0-9]{64}$/i.test(token)) {
-      return NextResponse.json(
-        { error: "Invalid or expired invitation." },
-        { status: 400 }
-      );
-    }
-
     const now = new Date();
 
     const [invitation] = await db

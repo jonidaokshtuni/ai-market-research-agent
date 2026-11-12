@@ -104,7 +104,13 @@ export default function PendingInvitations() {
   }, []);
 
   useEffect(() => {
-    void loadInvitations();
+    const timeoutId = window.setTimeout(() => {
+      void loadInvitations();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, [loadInvitations]);
 
   async function handleAction(

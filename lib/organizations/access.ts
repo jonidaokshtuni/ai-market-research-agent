@@ -1,9 +1,14 @@
 import "server-only";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
-import { organizationMembers, organizations, users } from "@/db/schema";
+import {
+  organizationJoinRequests,
+  organizationMembers,
+  organizations,
+  users,
+} from "@/db/schema";
 
 export type WorkspaceRole = "owner" | "admin" | "member";
 
@@ -29,6 +34,13 @@ export type WorkspaceMember = {
   email: string;
   role: WorkspaceRole;
   joinedAt: Date;
+};
+
+export type WorkspaceJoinRequest = {
+  id: string;
+  status: typeof organizationJoinRequests.$inferSelect.status;
+  createdAt: Date;
+  workspaceName: string;
 };
 
 export async function getUserWorkspaces(
@@ -80,6 +92,31 @@ export async function getManageableWorkspaces(
     ...membership,
     role: membership.role as WorkspaceAdminRole,
   }));
+}
+
+/**
+ * Returns the latest workspace join request for a user.
+ */
+export async function getLatestWorkspaceJoinRequest(
+  userId: string
+): Promise<WorkspaceJoinRequest | null> {
+  const [request] = await db
+    .select({
+      id: organizationJoinRequests.id,
+      status: organizationJoinRequests.status,
+      createdAt: organizationJoinRequests.createdAt,
+      workspaceName: organizations.name,
+    })
+    .from(organizationJoinRequests)
+    .innerJoin(
+      organizations,
+      eq(organizationJoinRequests.organizationId, organizations.id)
+    )
+    .where(eq(organizationJoinRequests.userId, userId))
+    .orderBy(desc(organizationJoinRequests.createdAt))
+    .limit(1);
+
+  return request ?? null;
 }
 
 /**

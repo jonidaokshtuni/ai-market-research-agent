@@ -1,14 +1,13 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
-import { eq, desc } from "drizzle-orm";
 import Link from "next/link";
 
-import { db } from "@/db";
-import { organizationJoinRequests, organizations } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getLatestWorkspaceJoinRequest } from "@/lib/organizations/access";
 import LogoutButton from "@/components/auth/logout-button";
 
-export default async function PendingApprovalPage() {
+async function PendingApprovalContent() {
   await connection();
 
   const user = await getCurrentUser();
@@ -17,23 +16,7 @@ export default async function PendingApprovalPage() {
     redirect("/login");
   }
 
-  const requests = await db
-    .select({
-      id: organizationJoinRequests.id,
-      status: organizationJoinRequests.status,
-      createdAt: organizationJoinRequests.createdAt,
-      workspaceName: organizations.name,
-    })
-    .from(organizationJoinRequests)
-    .innerJoin(
-      organizations,
-      eq(organizationJoinRequests.organizationId, organizations.id)
-    )
-    .where(eq(organizationJoinRequests.userId, user.id))
-    .orderBy(desc(organizationJoinRequests.createdAt))
-    .limit(1);
-
-  const request = requests[0];
+  const request = await getLatestWorkspaceJoinRequest(user.id);
 
   if (!request) {
     redirect("/register");
@@ -106,5 +89,19 @@ export default async function PendingApprovalPage() {
         <LogoutButton />
       </div>
     </div>
+  );
+}
+
+export default function PendingApprovalPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="rounded-2xl border border-gray-800 bg-gray-900 p-8 shadow-xl">
+          <p className="text-sm text-gray-400">Loading approval status...</p>
+        </div>
+      }
+    >
+      <PendingApprovalContent />
+    </Suspense>
   );
 }

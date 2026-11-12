@@ -7,7 +7,6 @@ import {
   CalendarClock,
   Check,
   Loader2,
-  Mail,
   Shield,
   Users,
   X,
@@ -135,7 +134,13 @@ export default function InvitationPrompt({ userEmail }: InvitationPromptProps) {
   }, [invitationToken, userEmail]);
 
   useEffect(() => {
-    void loadInvitation();
+    const timeoutId = window.setTimeout(() => {
+      void loadInvitation();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, [loadInvitation]);
 
   function handleClose() {

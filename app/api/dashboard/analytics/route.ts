@@ -20,17 +20,21 @@ function parseDate(value: string | null): Date | null {
 }
 
 export async function GET(request: Request) {
+  // Request-dependent APIs must remain outside the catch block
+  // so Next.js can handle its prerendering control signals.
+  const user = await getCurrentUser();
+  const { searchParams } = new URL(request.url);
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const user = await getCurrentUser();
+    const startValue = searchParams.get("start");
+    const endValue = searchParams.get("end");
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { searchParams } = new URL(request.url);
-
-    const startDate = parseDate(searchParams.get("start"));
-    const endDate = parseDate(searchParams.get("end"));
+    const startDate = parseDate(startValue);
+    const endDate = parseDate(endValue);
 
     if (!startDate || !endDate) {
       return NextResponse.json(
@@ -61,8 +65,8 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ...analytics,
       period: {
-        start: searchParams.get("start"),
-        end: searchParams.get("end"),
+        start: startValue,
+        end: endValue,
         days,
       },
     });

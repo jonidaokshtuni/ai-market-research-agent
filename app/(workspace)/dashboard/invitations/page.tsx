@@ -27,8 +27,8 @@ export default async function InvitationsPage() {
           </h1>
 
           <p className="mt-2 text-sm text-muted-foreground">
-            Review invitations you've received and choose which workspaces to
-            join.
+            Review invitations you&apos;ve received and choose which workspaces
+            to join.
           </p>
         </div>
       </div>

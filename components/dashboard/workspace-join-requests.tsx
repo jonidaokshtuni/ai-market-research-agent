@@ -20,63 +20,153 @@ type JoinRequest = {
   };
 };
 
+type RequestState = {
+  organizationId: string;
+  requests: JoinRequest[];
+  error: string;
+};
+
+async function fetchJoinRequests(
+  organizationId: string,
+  signal?: AbortSignal
+): Promise<JoinRequest[]> {
+  const response = await fetch(
+    `/api/organizations/join-requests?organizationId=${encodeURIComponent(
+      organizationId
+    )}`,
+    {
+      cache: "no-store",
+      signal,
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to load join requests.");
+  }
+
+  return Array.isArray(data.requests) ? data.requests : [];
+}
+
 export default function WorkspaceJoinRequests({
   workspaces,
 }: {
   workspaces: Workspace[];
 }) {
-  const [organizationId, setOrganizationId] = useState(workspaces[0]?.id ?? "");
-  const [requests, setRequests] = useState<JoinRequest[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
+    workspaces[0]?.id ?? ""
+  );
+
+  const [requestState, setRequestState] = useState<RequestState>({
+    organizationId: "",
+    requests: [],
+    error: "",
+  });
+
   const [selectedRoles, setSelectedRoles] = useState<
     Record<string, "member" | "admin">
   >({});
-  const [loading, setLoading] = useState(true);
+
+  const [refreshing, setRefreshing] = useState(false);
   const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
+
+  // Keep the selection valid if the available workspaces change.
+  const organizationId = workspaces.some(
+    (workspace) => workspace.id === selectedWorkspaceId
+  )
+    ? selectedWorkspaceId
+    : workspaces[0]?.id ?? "";
 
   const selectedWorkspace = workspaces.find(
     (workspace) => workspace.id === organizationId
   );
 
-  const loadRequests = useCallback(async () => {
-    if (!organizationId) return;
+  const isLoading =
+    Boolean(organizationId) && requestState.organizationId !== organizationId;
 
-    setLoading(true);
-    setError("");
+  const requests =
+    requestState.organizationId === organizationId ? requestState.requests : [];
 
-    try {
-      const response = await fetch(
-        `/api/organizations/join-requests?organizationId=${encodeURIComponent(
-          organizationId
-        )}`,
-        { cache: "no-store" }
-      );
+  const error =
+    requestState.organizationId === organizationId
+      ? requestState.error
+      : actionError;
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load join requests.");
-      }
-
-      setRequests(Array.isArray(data.requests) ? data.requests : []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setLoading(false);
+  // Fetch requests whenever the selected workspace changes.
+  // Previous requests are aborted to prevent stale responses.
+  useEffect(() => {
+    if (!organizationId) {
+      return;
     }
+
+    const controller = new AbortController();
+
+    async function load() {
+      try {
+        const nextRequests = await fetchJoinRequests(
+          organizationId,
+          controller.signal
+        );
+
+        if (!controller.signal.aborted) {
+          setRequestState({
+            organizationId,
+            requests: nextRequests,
+            error: "",
+          });
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setRequestState({
+            organizationId,
+            requests: [],
+            error: err instanceof Error ? err.message : "Something went wrong.",
+          });
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      controller.abort();
+    };
   }, [organizationId]);
 
-  useEffect(() => {
-    void loadRequests();
-  }, [loadRequests]);
+  const refreshRequests = useCallback(async () => {
+    if (!organizationId) return;
+
+    setRefreshing(true);
+    setActionError("");
+
+    try {
+      const nextRequests = await fetchJoinRequests(organizationId);
+
+      setRequestState({
+        organizationId,
+        requests: nextRequests,
+        error: "",
+      });
+    } catch (err) {
+      setRequestState({
+        organizationId,
+        requests: [],
+        error: err instanceof Error ? err.message : "Something went wrong.",
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [organizationId]);
 
   async function reviewRequest(
     requestId: string,
     action: "approve" | "reject"
   ) {
     setBusyRequestId(requestId);
-    setError("");
+    setActionError("");
     setMessage("");
 
     try {
@@ -110,9 +200,11 @@ export default function WorkspaceJoinRequests({
           : "Join request rejected."
       );
 
-      await loadRequests();
+      await refreshRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setActionError(
+        err instanceof Error ? err.message : "Something went wrong."
+      );
     } finally {
       setBusyRequestId(null);
     }
@@ -129,11 +221,11 @@ export default function WorkspaceJoinRequests({
 
         <button
           type="button"
-          onClick={() => void loadRequests()}
-          disabled={loading}
+          onClick={() => void refreshRequests()}
+          disabled={isLoading || refreshing || !organizationId}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/[0.08] disabled:opacity-50"
         >
-          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
           Refresh
         </button>
       </div>
@@ -151,9 +243,9 @@ export default function WorkspaceJoinRequests({
             id="workspace"
             value={organizationId}
             onChange={(event) => {
-              setOrganizationId(event.target.value);
+              setSelectedWorkspaceId(event.target.value);
               setMessage("");
-              setError("");
+              setActionError("");
             }}
             className="w-full rounded-xl border border-white/10 bg-[#111b2d] px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
           >
@@ -212,9 +304,13 @@ export default function WorkspaceJoinRequests({
           </span>
         </div>
 
-        {loading ? (
+        {isLoading ? (
           <div className="p-10 text-center text-sm text-slate-400">
             Loading join requests...
+          </div>
+        ) : !organizationId ? (
+          <div className="p-10 text-center text-sm text-slate-400">
+            No manageable workspaces available.
           </div>
         ) : requests.length === 0 ? (
           <div className="p-10 text-center">
@@ -270,9 +366,10 @@ export default function WorkspaceJoinRequests({
                         onChange={(event) =>
                           setSelectedRoles((current) => ({
                             ...current,
-                            [request.id]: event.target.value as
-                              | "member"
-                              | "admin",
+                            [request.id]:
+                              event.target.value === "admin"
+                                ? "admin"
+                                : "member",
                           }))
                         }
                         className="w-full rounded-lg border border-white/10 bg-[#111b2d] px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50"

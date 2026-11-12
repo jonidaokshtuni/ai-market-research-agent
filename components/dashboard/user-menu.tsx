@@ -9,9 +9,14 @@ type UserMenuProps = {
   email: string;
 };
 
-export default function UserMenu({ name, email }: UserMenuProps) {
-  const router = useRouter();
+export default function UserMenu(props: UserMenuProps) {
   const pathname = usePathname();
+
+  return <UserMenuContent key={pathname} {...props} />;
+}
+
+function UserMenuContent({ name, email }: UserMenuProps) {
+  const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
@@ -25,13 +30,6 @@ export default function UserMenu({ name, email }: UserMenuProps) {
     .map((part) => part[0])
     .join("")
     .toUpperCase();
-
-  // Reset transient menu state whenever navigation changes.
-  useEffect(() => {
-    setIsOpen(false);
-    setIsLoggingOut(false);
-    setError("");
-  }, [pathname]);
 
   // Close the menu when clicking outside or pressing Escape.
   useEffect(() => {
@@ -72,10 +70,6 @@ export default function UserMenu({ name, email }: UserMenuProps) {
         throw new Error("Unable to sign out. Please try again.");
       }
 
-      // Clear the menu state before navigating away.
-      setIsOpen(false);
-      setIsLoggingOut(false);
-
       router.replace("/login");
       router.refresh();
     } catch (err) {
@@ -84,7 +78,6 @@ export default function UserMenu({ name, email }: UserMenuProps) {
           ? err.message
           : "Unable to sign out. Please try again."
       );
-    } finally {
       setIsLoggingOut(false);
     }
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { SyntheticEvent } from "react";
 import {
   EMPTY_COMPETITOR_FORM,
@@ -22,37 +22,39 @@ const inputClass =
 
 const labelClass = "mb-2 block text-sm font-medium text-slate-300";
 
+function getInitialFormValues(
+  competitor?: Competitor | null
+): CompetitorFormValues {
+  if (!competitor) {
+    return { ...EMPTY_COMPETITOR_FORM };
+  }
+
+  return {
+    name: competitor.name,
+    website: competitor.website ?? "",
+    industry: competitor.industry ?? "",
+    description: competitor.description ?? "",
+    products: competitor.products ?? "",
+    pricing: competitor.pricing ?? "",
+    strengths: competitor.strengths ?? "",
+    weaknesses: competitor.weaknesses ?? "",
+    marketStrength: competitor.marketStrength,
+    innovationScore: competitor.innovationScore,
+  };
+}
+
 export default function CompetitorForm({
   competitor,
   isSaving,
   onSubmit,
   onCancel,
 }: CompetitorFormProps) {
-  const [form, setForm] = useState<CompetitorFormValues>(EMPTY_COMPETITOR_FORM);
+  const [form, setForm] = useState<CompetitorFormValues>(() =>
+    getInitialFormValues(competitor)
+  );
   const [validationError, setValidationError] = useState("");
 
   const isEditing = Boolean(competitor);
-
-  useEffect(() => {
-    if (competitor) {
-      setForm({
-        name: competitor.name,
-        website: competitor.website ?? "",
-        industry: competitor.industry ?? "",
-        description: competitor.description ?? "",
-        products: competitor.products ?? "",
-        pricing: competitor.pricing ?? "",
-        strengths: competitor.strengths ?? "",
-        weaknesses: competitor.weaknesses ?? "",
-        marketStrength: competitor.marketStrength,
-        innovationScore: competitor.innovationScore,
-      });
-    } else {
-      setForm(EMPTY_COMPETITOR_FORM);
-    }
-
-    setValidationError("");
-  }, [competitor]);
 
   function updateField<K extends keyof CompetitorFormValues>(
     field: K,
@@ -239,7 +241,7 @@ export default function CompetitorForm({
               Commercial intelligence
             </h3>
             <p className="mb-4 mt-1 text-xs text-slate-500">
-              Document the company's commercial strategy.
+              Document the company&apos;s commercial strategy.
             </p>
 
             <label htmlFor="competitor-pricing" className={labelClass}>

@@ -26,6 +26,23 @@ async function getErrorMessage(response: Response): Promise<string> {
   }
 }
 
+function parseCompetitorsResponse(data: unknown): Competitor[] {
+  const result = Array.isArray(data)
+    ? data
+    : data &&
+      typeof data === "object" &&
+      "competitors" in data &&
+      Array.isArray(data.competitors)
+    ? data.competitors
+    : null;
+
+  if (!result) {
+    throw new Error("The server returned an invalid competitors response.");
+  }
+
+  return result as Competitor[];
+}
+
 export default function CompetitorManager() {
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -59,21 +76,7 @@ export default function CompetitorManager() {
 
       const data: unknown = await response.json();
 
-      // Support either an array or { competitors: [...] } response.
-      const result = Array.isArray(data)
-        ? data
-        : data &&
-          typeof data === "object" &&
-          "competitors" in data &&
-          Array.isArray(data.competitors)
-        ? data.competitors
-        : null;
-
-      if (!result) {
-        throw new Error("The server returned an invalid competitors response.");
-      }
-
-      setCompetitors(result as Competitor[]);
+      setCompetitors(parseCompetitorsResponse(data));
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         return;
@@ -91,13 +94,48 @@ export default function CompetitorManager() {
     }
   }, []);
 
+  // Initial data loading.
   useEffect(() => {
     const controller = new AbortController();
 
-    void loadCompetitors(controller.signal);
+    async function fetchInitialCompetitors() {
+      try {
+        const response = await fetch("/api/competitors", {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(await getErrorMessage(response));
+        }
+
+        const data: unknown = await response.json();
+
+        if (!controller.signal.aborted) {
+          setCompetitors(parseCompetitorsResponse(data));
+        }
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load competitors. Please try again."
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void fetchInitialCompetitors();
 
     return () => controller.abort();
-  }, [loadCompetitors]);
+  }, []);
 
   function openCreateForm() {
     setSelectedCompetitor(null);
@@ -200,10 +238,7 @@ export default function CompetitorManager() {
       setDeletingId(null);
     }
   }
-  console.log("FORM STATE:", {
-    isFormOpen,
-    selectedCompetitor: selectedCompetitor?.name,
-  });
+
   return (
     <div className="space-y-7">
       {/* Page actions */}
@@ -276,6 +311,7 @@ export default function CompetitorManager() {
           size="lg"
         >
           <CompetitorForm
+            key={selectedCompetitor?.id ?? "new"}
             competitor={selectedCompetitor}
             isSaving={isSaving}
             onSubmit={handleSubmit}

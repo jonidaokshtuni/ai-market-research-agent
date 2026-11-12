@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Mail, Send, Loader2, ShieldCheck, UserPlus } from "lucide-react";
+import { Send, Loader2, ShieldCheck, UserPlus } from "lucide-react";
 
 import Modal from "@/components/ui/modal";
 import type { ManageableWorkspace } from "@/lib/organizations/access";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 
@@ -22,6 +22,29 @@ const SIZE_CLASSES: Record<ModalSize, string> = {
   xl: "max-w-5xl",
 };
 
+// useSyncExternalStore provides a hydration-safe client-mounted check.
+function subscribeToMount(): () => void {
+  return () => {};
+}
+
+function getClientSnapshot(): boolean {
+  return true;
+}
+
+function getServerSnapshot(): boolean {
+  return false;
+}
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  'input:not([disabled]):not([type="hidden"])',
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+  '[contenteditable="true"]',
+].join(",");
+
 export default function Modal({
   isOpen,
   onClose,
@@ -30,28 +53,50 @@ export default function Modal({
   children,
   size = "lg",
 }: ModalProps) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToMount,
+    getClientSnapshot,
+    getServerSnapshot
+  );
+
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
 
   const titleId = useId();
   const descriptionId = useId();
 
-  onCloseRef.current = onClose;
-
-  // Wait until the component is mounted before using document.body.
+  // Keep the latest callback without changing the keyboard listener.
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
-    if (!isOpen || !mounted) return;
+    if (!isOpen || !mounted) {
+      return;
+    }
 
-    const previousActiveElement = document.activeElement as HTMLElement | null;
+    const previousActiveElement = document.activeElement;
     const previousOverflow = document.body.style.overflow;
 
     document.body.style.overflow = "hidden";
+
     dialogRef.current?.focus();
+
+    function getFocusableElements(): HTMLElement[] {
+      if (!dialogRef.current) {
+        return [];
+      }
+
+      return Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+      ).filter((element) => {
+        return (
+          !element.hasAttribute("hidden") &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0
+        );
+      });
+    }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -60,14 +105,13 @@ export default function Modal({
         return;
       }
 
-      if (event.key !== "Tab") return;
+      if (event.key !== "Tab") {
+        return;
+      }
 
-      const focusableElements =
-        dialogRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
+      const focusableElements = getFocusableElements();
 
-      if (!focusableElements?.length) {
+      if (focusableElements.length === 0) {
         event.preventDefault();
         dialogRef.current?.focus();
         return;
@@ -75,11 +119,20 @@ export default function Modal({
 
       const firstElement = focusableElements[0];
       const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
 
-      if (event.shiftKey && document.activeElement === firstElement) {
+      if (
+        event.shiftKey &&
+        (activeElement === firstElement ||
+          !dialogRef.current?.contains(activeElement))
+      ) {
         event.preventDefault();
         lastElement.focus();
-      } else if (!event.shiftKey && document.activeElement === lastElement) {
+      } else if (
+        !event.shiftKey &&
+        (activeElement === lastElement ||
+          !dialogRef.current?.contains(activeElement))
+      ) {
         event.preventDefault();
         firstElement.focus();
       }
@@ -89,12 +142,21 @@ export default function Modal({
 
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+
       document.body.style.overflow = previousOverflow;
-      previousActiveElement?.focus();
+
+      if (
+        previousActiveElement instanceof HTMLElement &&
+        previousActiveElement.isConnected
+      ) {
+        previousActiveElement.focus();
+      }
     };
   }, [isOpen, mounted]);
 
-  if (!mounted || !isOpen) return null;
+  if (!mounted || !isOpen) {
+    return null;
+  }
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
