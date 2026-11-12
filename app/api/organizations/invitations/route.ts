@@ -39,7 +39,7 @@ async function revokeInvitation(invitationId: string) {
     .where(eq(organizationInvitations.id, invitationId));
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const currentUser = await getCurrentUser();
 
@@ -47,6 +47,79 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
+    const searchParams = new URL(request.url).searchParams;
+    const organizationId = searchParams.get("organizationId");
+    const email = searchParams.get("email")?.trim().toLowerCase();
+
+    // Check whether a specific workspace/email has an active invitation.
+    if (organizationId || email) {
+      if (
+        !organizationId ||
+        !email ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          organizationId
+        ) ||
+        email.length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      ) {
+        return NextResponse.json(
+          { error: "Invalid invitation lookup parameters." },
+          { status: 400 }
+        );
+      }
+
+      const [membership] = await db
+        .select({
+          role: organizationMembers.role,
+        })
+        .from(organizationMembers)
+        .where(
+          and(
+            eq(organizationMembers.organizationId, organizationId),
+            eq(organizationMembers.userId, currentUser.id)
+          )
+        )
+        .limit(1);
+
+      if (
+        !membership ||
+        (membership.role !== "owner" && membership.role !== "admin")
+      ) {
+        return NextResponse.json(
+          { error: "You do not have permission to check invitations." },
+          { status: 403 }
+        );
+      }
+
+      const [activeInvitation] = await db
+        .select({
+          expiresAt: organizationInvitations.expiresAt,
+        })
+        .from(organizationInvitations)
+        .where(
+          and(
+            eq(organizationInvitations.organizationId, organizationId),
+            eq(sql`lower(${organizationInvitations.email})`, email),
+            isNull(organizationInvitations.acceptedAt),
+            isNull(organizationInvitations.revokedAt),
+            gt(organizationInvitations.expiresAt, new Date())
+          )
+        )
+        .limit(1);
+
+      return NextResponse.json(
+        {
+          activeInvitation: activeInvitation ?? null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        }
+      );
+    }
+
+    // Preserve the existing behavior: fetch invitations for the current user.
     const invitations = await db
       .select({
         id: organizationInvitations.id,
