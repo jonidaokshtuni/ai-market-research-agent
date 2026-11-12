@@ -11,7 +11,6 @@ function hashToken(token: string): string {
 
 export async function POST(request: Request) {
   try {
-    // 1. Require an authenticated user.
     const currentUser = await getCurrentUser();
 
     if (!currentUser) {
@@ -21,7 +20,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Validate the invitation token.
     let body: unknown;
 
     try {
@@ -40,19 +38,30 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = (body as Record<string, unknown>).token;
+    const data = body as Record<string, unknown>;
+    const token = data.token;
+    const invitationId = data.invitationId;
 
-    if (typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token)) {
+    const validToken =
+      typeof token === "string" && /^[a-f0-9]{64}$/i.test(token);
+
+    const validInvitationId =
+      typeof invitationId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        invitationId
+      );
+
+    if (!validToken && !validInvitationId) {
       return NextResponse.json(
-        { error: "A valid invitation token is required." },
+        { error: "A valid invitation token or invitation ID is required." },
         { status: 400 }
       );
     }
 
-    const tokenHash = hashToken(token);
+    const tokenHash = validToken ? hashToken(token) : null;
+    const id = validInvitationId ? invitationId : null;
 
-    // 3. Accept the invitation and create membership atomically.
-    // The invitation row is locked to prevent concurrent acceptance.
+    // Accept the invitation and create membership atomically.
     const result = await db.execute(sql`
       WITH valid_invitation AS MATERIALIZED (
         SELECT
@@ -60,7 +69,11 @@ export async function POST(request: Request) {
           organization_id,
           role
         FROM organization_invitations
-        WHERE token_hash = ${tokenHash}
+        WHERE (
+          (${tokenHash}::text IS NOT NULL AND token_hash = ${tokenHash})
+          OR
+          (${id}::text IS NOT NULL AND id::text = ${id})
+        )
           AND LOWER(email) = LOWER(${currentUser.email})
           AND accepted_at IS NULL
           AND revoked_at IS NULL
@@ -130,9 +143,7 @@ export async function POST(request: Request) {
 
     if (!row.membership_added || !row.invitation_accepted) {
       return NextResponse.json(
-        {
-          error: "You are already a member of this workspace.",
-        },
+        { error: "You are already a member of this workspace." },
         { status: 409 }
       );
     }

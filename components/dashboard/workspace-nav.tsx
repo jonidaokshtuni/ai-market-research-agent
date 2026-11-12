@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -8,6 +9,7 @@ import {
   Users,
   FileText,
   ShieldCheck,
+  Mail,
   Bot,
   Sparkles,
   ArrowUpRight,
@@ -25,6 +27,38 @@ export default function WorkspaceNav({
   const pathname = usePathname();
   const isMobile = variant === "mobile";
 
+  const [pendingInvitationCount, setPendingInvitationCount] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadPendingInvitations() {
+      try {
+        const response = await fetch("/api/organizations/invitations", {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        if (Array.isArray(data.invitations)) {
+          setPendingInvitationCount(data.invitations.length);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name !== "AbortError") {
+          console.error("Unable to load pending invitations:", error);
+        }
+      }
+    }
+
+    loadPendingInvitations();
+
+    return () => controller.abort();
+  }, [pathname]);
+
   const navigation = [
     { name: "Overview", href: "/", icon: LayoutDashboard },
     {
@@ -34,6 +68,12 @@ export default function WorkspaceNav({
     },
     { name: "Competitors", href: "/dashboard/competitors", icon: Users },
     { name: "Reports", href: "/dashboard/reports", icon: FileText },
+    {
+      name: "Invitations",
+      href: "/dashboard/invitations",
+      icon: Mail,
+      badge: pendingInvitationCount,
+    },
     ...(canManageMembers
       ? [
           {
@@ -105,7 +145,13 @@ export default function WorkspaceNav({
 
               <span>{item.name}</span>
 
-              {!isMobile && active && (
+              {item.badge !== undefined && item.badge > 0 && (
+                <span className="ml-auto min-w-5 rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-center text-[10px] font-bold leading-4 text-indigo-300">
+                  {item.badge > 99 ? "99+" : item.badge}
+                </span>
+              )}
+
+              {!isMobile && active && item.badge === undefined && (
                 <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-400" />
               )}
             </Link>

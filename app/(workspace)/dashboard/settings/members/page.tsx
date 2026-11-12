@@ -7,6 +7,8 @@ import {
   getManageableWorkspaceMembers,
 } from "@/lib/organizations/access";
 import { getCurrentUser } from "@/lib/auth";
+
+import WorkspaceInvitationForm from "@/components/dashboard/workspace-invitation-form";
 import WorkspaceJoinRequests from "@/components/dashboard/workspace-join-requests";
 import WorkspaceMembersList from "@/components/dashboard/workspace-members-list";
 
@@ -40,18 +42,20 @@ export default async function WorkspaceMembersPage() {
           </h1>
 
           <p className="mt-2 text-sm text-muted-foreground">
-            View your organization members and manage requests for workspace
-            access.
+            Manage workspace members, invite new people, and review access
+            requests.
           </p>
         </div>
       </div>
+
+      <WorkspaceInvitationForm workspaces={manageableWorkspaces} />
 
       <WorkspaceMembersList
         workspaces={manageableWorkspaces}
         members={members}
       />
 
-      <div className="border-t border-white/[0.08] pt-8">
+      <div className="border-t border-white/8 pt-8">
         <WorkspaceJoinRequests workspaces={manageableWorkspaces} />
       </div>
     </div>

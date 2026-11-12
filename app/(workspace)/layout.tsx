@@ -2,15 +2,17 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { LayoutDashboard } from "lucide-react";
 
 import { db } from "@/db";
-import { organizationJoinRequests } from "@/db/schema";
+import { organizationInvitations, organizationJoinRequests } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { getUserWorkspaces } from "@/lib/organizations/access";
+
 import WorkspaceNav from "@/components/dashboard/workspace-nav";
 import UserMenu from "@/components/dashboard/user-menu";
+import InvitationPrompt from "@/components/dashboard/invitation-prompt";
 
 type WorkspaceLayoutProps = {
   children: ReactNode;
@@ -43,24 +45,45 @@ async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
 
   const workspaces = await getUserWorkspaces(user.id);
 
+  let hasPendingInvitations = false;
+
   if (workspaces.length === 0) {
-    const [latestJoinRequest] = await db
+    const [pendingInvitation] = await db
       .select({
-        status: organizationJoinRequests.status,
+        id: organizationInvitations.id,
       })
-      .from(organizationJoinRequests)
-      .where(eq(organizationJoinRequests.userId, user.id))
-      .orderBy(desc(organizationJoinRequests.createdAt))
+      .from(organizationInvitations)
+      .where(
+        and(
+          sql`LOWER(${organizationInvitations.email}) = LOWER(${user.email})`,
+          isNull(organizationInvitations.acceptedAt),
+          isNull(organizationInvitations.revokedAt),
+          gt(organizationInvitations.expiresAt, new Date())
+        )
+      )
       .limit(1);
 
-    if (
-      latestJoinRequest?.status === "pending" ||
-      latestJoinRequest?.status === "rejected"
-    ) {
-      redirect("/pending-approval");
-    }
+    hasPendingInvitations = Boolean(pendingInvitation);
 
-    redirect("/register");
+    if (!hasPendingInvitations) {
+      const [latestJoinRequest] = await db
+        .select({
+          status: organizationJoinRequests.status,
+        })
+        .from(organizationJoinRequests)
+        .where(eq(organizationJoinRequests.userId, user.id))
+        .orderBy(desc(organizationJoinRequests.createdAt))
+        .limit(1);
+
+      if (
+        latestJoinRequest?.status === "pending" ||
+        latestJoinRequest?.status === "rejected"
+      ) {
+        redirect("/pending-approval");
+      }
+
+      redirect("/register");
+    }
   }
 
   const canManageMembers = workspaces.some(
@@ -71,6 +94,9 @@ async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Invitation dialog */}
+      <InvitationPrompt userEmail={user.email} />
+
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-white/[0.07] bg-card md:flex">
         <div className="flex h-20 items-center gap-3 border-b border-white/[0.07] px-6">

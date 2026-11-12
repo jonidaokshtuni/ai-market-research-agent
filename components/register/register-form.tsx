@@ -11,6 +11,13 @@ type Workspace = {
   name: string;
 };
 
+type Invitation = {
+  email: string;
+  role: "admin" | "member";
+  workspaceName: string;
+  expiresAt: string;
+};
+
 type RegisterFormProps = {
   invitationToken?: string;
 };
@@ -23,6 +30,11 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
   );
 
   const [inviteToken, setInviteToken] = useState(invitationToken ?? "");
+  const [invitation, setInvitation] = useState<Invitation | null>(null);
+  const [validatingInvitation, setValidatingInvitation] = useState(
+    Boolean(invitationToken)
+  );
+  const [invitationError, setInvitationError] = useState("");
 
   const [name, setName] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
@@ -41,16 +53,76 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Automatically detect invitation links.
+  // Detect invitation links and validate the token with the server.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("invite");
+    const token = params.get("invite") || invitationToken || "";
 
-    if (token) {
-      setInviteToken(token);
-      setMode("join");
+    if (!token) {
+      setValidatingInvitation(false);
+      return;
     }
-  }, []);
+
+    setInviteToken(token);
+    setMode("join");
+    setValidatingInvitation(true);
+    setInvitation(null);
+    setInvitationError("");
+
+    const controller = new AbortController();
+
+    async function validateInvitation() {
+      try {
+        const response = await fetch(
+          `/api/organizations/invitations/validate?token=${encodeURIComponent(
+            token
+          )}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setInvitationError(
+            data.error || "This invitation is invalid or expired."
+          );
+          return;
+        }
+
+        const validatedInvitation = data.invitation as Invitation;
+
+        if (
+          !validatedInvitation ||
+          typeof validatedInvitation.email !== "string" ||
+          typeof validatedInvitation.workspaceName !== "string"
+        ) {
+          setInvitationError("Unable to verify this invitation.");
+          return;
+        }
+
+        setInvitation(validatedInvitation);
+        setEmail(validatedInvitation.email);
+      } catch (err) {
+        if (err instanceof Error && err.name !== "AbortError") {
+          setInvitationError(
+            "Unable to verify this invitation. Please try again."
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setValidatingInvitation(false);
+        }
+      }
+    }
+
+    void validateInvitation();
+
+    return () => controller.abort();
+  }, [invitationToken]);
 
   // Search existing workspaces when the user chooses Join.
   useEffect(() => {
@@ -121,6 +193,11 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
       return;
     }
 
+    if (mode === "join" && (!invitation || validatingInvitation)) {
+      setError("Please wait until your invitation has been verified.");
+      return;
+    }
+
     if (mode === "request" && !selectedWorkspace) {
       setError("Please search for and select a workspace first.");
       return;
@@ -137,7 +214,7 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
         body: JSON.stringify({
           mode,
           name,
-          email,
+          email: mode === "join" ? invitation?.email : email,
           password,
           ...(mode === "create" ? { workspaceName } : {}),
           ...(mode === "join" ? { inviteToken } : {}),
@@ -150,6 +227,15 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
       const data = await response.json();
 
       if (!response.ok) {
+        if (
+          mode === "join" &&
+          response.status === 409 &&
+          /already exists|already registered|sign in/i.test(data.error || "")
+        ) {
+          router.push(`/login?invite=${encodeURIComponent(inviteToken)}`);
+          return;
+        }
+
         setError(data.error || "Registration failed.");
         return;
       }
@@ -198,9 +284,9 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
             <button
               type="button"
               onClick={() => changeMode("request")}
-              aria-pressed={mode === "request" || isInvitation}
+              aria-pressed={mode === "request"}
               className={`rounded-lg border p-3 text-sm font-medium transition ${
-                mode === "request" || isInvitation
+                mode === "request"
                   ? "border-blue-500 bg-blue-600/15 text-blue-300"
                   : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
               }`}
@@ -217,11 +303,32 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
               Workspace invitation
             </p>
 
-            <p className="mt-1 text-sm text-gray-400">
-              Complete your registration using the email address that received
-              this invitation. Your workspace access will be assigned
-              automatically.
-            </p>
+            {validatingInvitation ? (
+              <p className="mt-2 text-sm text-gray-400">
+                Verifying your invitation...
+              </p>
+            ) : invitationError ? (
+              <p role="alert" className="mt-2 text-sm text-red-400">
+                {invitationError}
+              </p>
+            ) : invitation ? (
+              <>
+                <p className="mt-2 text-sm text-gray-300">
+                  You've been invited to join{" "}
+                  <strong>{invitation.workspaceName}</strong>.
+                </p>
+
+                <p className="mt-2 text-xs text-gray-400">
+                  Your assigned role:{" "}
+                  {invitation.role === "admin" ? "Administrator" : "Member"}
+                </p>
+
+                <p className="mt-1 text-xs text-gray-400">
+                  Invitation expires on{" "}
+                  {new Date(invitation.expiresAt).toLocaleDateString()}
+                </p>
+              </>
+            ) : null}
           </div>
         )}
 
@@ -380,15 +487,19 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
               autoComplete="email"
               required
               maxLength={254}
-              value={email}
+              value={isInvitation ? invitation?.email ?? "" : email}
               onChange={(e) => setEmail(e.target.value)}
+              readOnly={isInvitation}
               placeholder="you@example.com"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none focus:border-blue-500"
+              className={`w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none focus:border-blue-500 ${
+                isInvitation ? "cursor-not-allowed opacity-75" : ""
+              }`}
             />
 
-            {isInvitation && (
+            {isInvitation && invitation && (
               <p className="mt-2 text-xs text-gray-500">
-                This must match the email address the invitation was sent to.
+                This email address is locked because the invitation was sent to
+                this address.
               </p>
             )}
           </div>
@@ -421,7 +532,8 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
             type="submit"
             disabled={
               loading ||
-              (isInvitation && !inviteToken) ||
+              (isInvitation &&
+                (!inviteToken || !invitation || validatingInvitation)) ||
               (mode === "request" && !selectedWorkspace)
             }
             className="w-full rounded-lg bg-blue-600 py-3 font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
@@ -438,7 +550,14 @@ export default function RegisterForm({ invitationToken }: RegisterFormProps) {
 
         <p className="mt-6 text-center text-sm text-gray-400">
           Already have an account?{" "}
-          <Link href="/login" className="text-blue-400 hover:underline">
+          <Link
+            href={
+              isInvitation && inviteToken
+                ? `/login?invite=${encodeURIComponent(inviteToken)}`
+                : "/login"
+            }
+            className="text-blue-400 hover:underline"
+          >
             Sign in
           </Link>
         </p>
