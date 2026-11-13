@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ChevronDown, LogOut, UserRound } from "lucide-react";
 
 type UserMenuProps = {
@@ -9,13 +9,7 @@ type UserMenuProps = {
   email: string;
 };
 
-export default function UserMenu(props: UserMenuProps) {
-  const pathname = usePathname();
-
-  return <UserMenuContent key={pathname} {...props} />;
-}
-
-function UserMenuContent({ name, email }: UserMenuProps) {
+export default function UserMenu({ name, email }: UserMenuProps) {
   const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -31,7 +25,6 @@ function UserMenuContent({ name, email }: UserMenuProps) {
     .join("")
     .toUpperCase();
 
-  // Close the menu when clicking outside or pressing Escape.
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -86,9 +79,13 @@ function UserMenuContent({ name, email }: UserMenuProps) {
     <div ref={menuRef} className="relative">
       <button
         type="button"
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={() => {
+          setIsOpen((current) => !current);
+          setError("");
+        }}
         aria-haspopup="menu"
         aria-expanded={isOpen}
+        aria-label="Open account menu"
         className="group flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-2 pr-3 transition-all duration-200 hover:border-white/20 hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
       >
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-bold text-white shadow-lg shadow-indigo-950/30">
@@ -114,7 +111,7 @@ function UserMenuContent({ name, email }: UserMenuProps) {
         <div
           role="menu"
           aria-label="User account menu"
-          className="absolute right-0 top-full z-50 mt-3 w-72 overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl shadow-black/40"
+          className="absolute right-0 top-full z-50 mt-3 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl shadow-black/40"
         >
           <div className="border-b border-white/[0.07] p-4">
             <div className="flex items-center gap-3">
@@ -141,7 +138,7 @@ function UserMenuContent({ name, email }: UserMenuProps) {
             <button
               type="button"
               role="menuitem"
-              onClick={handleLogout}
+              onClick={() => void handleLogout()}
               disabled={isLoggingOut}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
             >

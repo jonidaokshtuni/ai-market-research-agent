@@ -6,6 +6,7 @@ import {
   sessions as sessionsTable,
 } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 import { runResearchAgent } from "@/lib/ai/orchestrator";
 import { ChatMessageSchema, ChatRequestSchema } from "@/lib/validation/chat";
 
@@ -15,21 +16,27 @@ const MAX_HISTORY_MESSAGES = 30;
 
 export async function POST(req: Request) {
   try {
-    //  Authenticate the user.
     const user = await getCurrentUser();
 
     if (!user) {
       return Response.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    //  Parse the request body.
+    const workspace = await getActiveWorkspace(user.id);
+
+    if (!workspace) {
+      return Response.json(
+        { error: "No active workspace found." },
+        { status: 403 }
+      );
+    }
+
     const body: unknown = await req.json().catch(() => null);
 
     if (body === null) {
       return Response.json({ error: "Invalid JSON request." }, { status: 400 });
     }
 
-    // Validate the request.
     const validation = ChatRequestSchema.safeParse(body);
 
     if (!validation.success) {
@@ -44,12 +51,15 @@ export async function POST(req: Request) {
 
     const { message, mode, sessionId } = validation.data;
 
-    //  Verify session ownership.
+    // Verify that the session belongs to the active workspace.
     const [session] = await db
       .select({ id: sessionsTable.id })
       .from(sessionsTable)
       .where(
-        and(eq(sessionsTable.id, sessionId), eq(sessionsTable.userId, user.id))
+        and(
+          eq(sessionsTable.id, sessionId),
+          eq(sessionsTable.organizationId, workspace.id)
+        )
       )
       .limit(1);
 
@@ -60,7 +70,7 @@ export async function POST(req: Request) {
       );
     }
 
-    //  Check whether this is the first message.
+    // Check whether this is the first message.
     const existingMessages = await db
       .select({ id: messagesTable.id })
       .from(messagesTable)
@@ -69,14 +79,14 @@ export async function POST(req: Request) {
 
     const isFirstMessage = existingMessages.length === 0;
 
-    //  Persist the new user message.
+    // Persist the new user message.
     await db.insert(messagesTable).values({
       sessionId,
       role: "user",
       content: message,
     });
 
-    //  Set the session title on the first message.
+    // Set the session title on the first message.
     if (isFirstMessage) {
       await db
         .update(sessionsTable)
@@ -86,12 +96,12 @@ export async function POST(req: Request) {
         .where(
           and(
             eq(sessionsTable.id, sessionId),
-            eq(sessionsTable.userId, user.id)
+            eq(sessionsTable.organizationId, workspace.id)
           )
         );
     }
 
-    // 8. Load trusted conversation history from the database.
+    // Load trusted conversation history from the database.
     const storedMessages = await db
       .select({
         role: messagesTable.role,
@@ -118,13 +128,13 @@ export async function POST(req: Request) {
       throw new Error("Invalid conversation history.");
     }
 
-    // 9. Execute the research agent.
+    // Execute the research agent.
     const result = await runResearchAgent({
       messages: conversationHistory,
       mode,
     });
 
-    // 10. Persist the assistant response.
+    // Persist the assistant response.
     await db.insert(messagesTable).values({
       sessionId,
       role: "assistant",
@@ -134,7 +144,6 @@ export async function POST(req: Request) {
       toolsUsed: result.toolsUsed,
     });
 
-    // 11. Return the response.
     return Response.json({
       success: true,
       mode,

@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { redirect } from "next/navigation";
 
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 import AnalyticsDashboard from "@/components/dashboard/analytics-dashboard";
 
 async function AnalyticsContent() {
@@ -14,6 +15,12 @@ async function AnalyticsContent() {
     redirect("/login");
   }
 
+  const activeWorkspace = await getActiveWorkspace(user.id);
+
+  if (!activeWorkspace) {
+    redirect("/");
+  }
+
   return (
     <div className="space-y-8 text-white">
       <div>
@@ -23,7 +30,7 @@ async function AnalyticsContent() {
         </p>
       </div>
 
-      <AnalyticsDashboard />
+      <AnalyticsDashboard key={activeWorkspace.id} />
     </div>
   );
 }

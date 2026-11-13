@@ -64,6 +64,27 @@
       "when": 1794473557339,
       "tag": "0008_add_organization_join_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794494458715,
+      "tag": "0009_glorious_liz_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794494902149,
+      "tag": "0010_backfill_session_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794496549532,
+      "tag": "0011_wooden_wong",
+      "breakpoints": true
     }
   ]
 }

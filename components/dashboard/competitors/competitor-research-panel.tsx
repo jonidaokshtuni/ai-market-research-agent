@@ -1,422 +1,172 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { ChangeHistory } from "./research/change-history";
+import { LatestSnapshot } from "./research/latest-snapshot";
+import { ResearchHistory } from "./research/research-history";
 import {
-  AlertCircle,
-  ArrowDown,
-  ArrowUp,
-  Clock3,
-  ExternalLink,
-  GitBranch,
-  LoaderCircle,
-  Minus,
-  RefreshCw,
-  Sparkles,
-  TrendingDown,
-  TrendingUp,
-  Zap,
-} from "lucide-react";
+  getApiError,
+  isRecord,
+  parseComparisonsResponse,
+  parseSnapshot,
+  parseSnapshotsResponse,
+  readJson,
+} from "./research/schemas";
+import type {
+  CompetitorComparison,
+  CompetitorResearchPanelProps,
+  CompetitorSnapshot,
+  Pagination,
+} from "./research/types";
 
-type Source = {
-  title: string;
-  url: string;
-};
+const SNAPSHOT_PAGE_SIZE = 10;
+const COMPARISON_PAGE_SIZE = 20;
 
-type SnapshotFinding = {
-  title: string;
-  description: string;
-  importance: "high" | "medium" | "low";
-  sources: Source[];
-};
+function mergeUniqueById<T extends { id: string }>(
+  current: T[],
+  incoming: T[],
+  append: boolean
+): T[] {
+  const seen = new Set<string>();
+  const records = append ? [...current, ...incoming] : incoming;
 
-type CompetitorSnapshot = {
-  id: string;
-  researchTask: string;
-  summary: string;
-  findings: SnapshotFinding[];
-  keyInsights: string[];
-  limitations: string[];
-  sources: Source[];
-  toolsUsed: string[];
-  createdAt: string;
-};
+  return records.filter((record) => {
+    if (seen.has(record.id)) {
+      return false;
+    }
 
-type CompetitorChange = {
-  category:
-    | "product"
-    | "pricing"
-    | "positioning"
-    | "strategy"
-    | "strength"
-    | "weakness"
-    | "market";
-  changeType: "new" | "changed" | "removed" | "strategic_shift";
-  title: string;
-  description: string;
-  previousValue: string | null;
-  currentValue: string | null;
-  impact: "high" | "medium" | "low";
-  confidence: "high" | "medium" | "low";
-  sources: Source[];
-};
-
-type CompetitorComparison = {
-  id: string;
-  previousSnapshotId: string;
-  currentSnapshotId: string;
-  summary: string;
-  overallImpact: "high" | "medium" | "low" | "none";
-  changes: CompetitorChange[];
-  limitations: string[];
-  sources: Source[];
-  createdAt: string;
-};
-
-type Pagination = {
-  limit: number;
-  offset: number;
-  hasMore: boolean;
-  nextOffset: number | null;
-};
-
-type Props = {
-  competitorId: string;
-  competitorName: string;
-};
-
-const importanceStyles = {
-  high: "border-rose-500/20 bg-rose-500/10 text-rose-400",
-  medium: "border-amber-500/20 bg-amber-500/10 text-amber-400",
-  low: "border-slate-700 bg-slate-800 text-slate-400",
-};
-
-const impactStyles = {
-  high: "border-rose-500/20 bg-rose-500/10 text-rose-400",
-  medium: "border-amber-500/20 bg-amber-500/10 text-amber-400",
-  low: "border-slate-700 bg-slate-800 text-slate-400",
-  none: "border-slate-700 bg-slate-800 text-slate-400",
-};
-
-const changeTypeStyles = {
-  new: {
-    label: "New",
-    icon: TrendingUp,
-    className: "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
-  },
-  changed: {
-    label: "Changed",
-    icon: RefreshCw,
-    className: "border-blue-500/20 bg-blue-500/10 text-blue-400",
-  },
-  removed: {
-    label: "Removed",
-    icon: TrendingDown,
-    className: "border-rose-500/20 bg-rose-500/10 text-rose-400",
-  },
-  strategic_shift: {
-    label: "Strategic shift",
-    icon: GitBranch,
-    className: "border-purple-500/20 bg-purple-500/10 text-purple-400",
-  },
-};
-
-const categoryLabels: Record<CompetitorChange["category"], string> = {
-  product: "Product",
-  pricing: "Pricing",
-  positioning: "Positioning",
-  strategy: "Strategy",
-  strength: "Strength",
-  weakness: "Weakness",
-  market: "Market",
-};
-
-function formatDate(date: string) {
-  return new Date(date).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
+    seen.add(record.id);
+    return true;
   });
 }
 
-function ChangeCard({ change }: { change: CompetitorChange }) {
-  const type = changeTypeStyles[change.changeType];
-  const TypeIcon = type.icon;
-
-  return (
-    <article className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${type.className}`}
-        >
-          <TypeIcon className="size-3" />
-          {type.label}
-        </span>
-
-        <span className="rounded-full border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">
-          {categoryLabels[change.category]}
-        </span>
-
-        <span
-          className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-            impactStyles[change.impact]
-          }`}
-        >
-          {change.impact} impact
-        </span>
-      </div>
-
-      <h4 className="mt-3 text-sm font-semibold text-white">{change.title}</h4>
-
-      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-400">
-        {change.description}
-      </p>
-
-      {(change.previousValue !== null || change.currentValue !== null) && (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <ArrowDown className="size-3" />
-              Previous
-            </div>
-
-            <p className="whitespace-pre-line text-sm leading-6 text-slate-300">
-              {change.previousValue ?? "Not available"}
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-blue-400">
-              <ArrowUp className="size-3" />
-              Current
-            </div>
-
-            <p className="whitespace-pre-line text-sm leading-6 text-slate-300">
-              {change.currentValue ?? "Not available"}
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-3">
-        <span className="text-xs text-slate-500">
-          Confidence:{" "}
-          <span className="font-medium capitalize text-slate-300">
-            {change.confidence}
-          </span>
-        </span>
-
-        {change.sources.length > 0 && (
-          <div className="flex flex-wrap gap-3">
-            {change.sources.map((source) => (
-              <a
-                key={source.url}
-                href={source.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-blue-400 transition hover:text-blue-300"
-              >
-                {source.title}
-                <ExternalLink className="size-3" />
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function ComparisonCard({ comparison }: { comparison: CompetitorComparison }) {
-  return (
-    <article className="relative border-l border-slate-800 pb-8 pl-6 last:border-l-transparent last:pb-0">
-      <span className="absolute -left-[7px] top-1 flex size-3.5 items-center justify-center rounded-full border-2 border-blue-500 bg-slate-950">
-        <span className="size-1 rounded-full bg-blue-400" />
-      </span>
-
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="flex items-center gap-2 text-xs text-slate-500">
-              <Clock3 className="size-3.5" />
-              {formatDate(comparison.createdAt)}
-            </p>
-
-            <h3 className="mt-2 text-sm font-semibold text-white">
-              Competitor change analysis
-            </h3>
-          </div>
-
-          <span
-            className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-              impactStyles[comparison.overallImpact]
-            }`}
-          >
-            {comparison.overallImpact === "none"
-              ? "No significant impact"
-              : `${comparison.overallImpact} impact`}
-          </span>
-        </div>
-
-        <p className="text-sm leading-6 text-slate-400">{comparison.summary}</p>
-
-        <div className="flex flex-wrap gap-2">
-          <span className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-400">
-            {comparison.changes.length}{" "}
-            {comparison.changes.length === 1 ? "change" : "changes"} detected
-          </span>
-
-          {comparison.changes.filter((change) => change.impact === "high")
-            .length > 0 && (
-            <span className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-xs text-rose-400">
-              {
-                comparison.changes.filter((change) => change.impact === "high")
-                  .length
-              }{" "}
-              high-impact
-            </span>
-          )}
-        </div>
-
-        {comparison.changes.length > 0 ? (
-          <div className="space-y-3">
-            {comparison.changes.map((change, index) => (
-              <ChangeCard
-                key={`${comparison.id}-change-${index}`}
-                change={change}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-            <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
-              <Minus className="size-4 text-slate-500" />
-              No significant changes detected
-            </div>
-
-            <p className="mt-1 text-xs leading-5 text-slate-500">
-              The analysis did not identify meaningful competitive changes
-              between these research snapshots.
-            </p>
-          </div>
-        )}
-
-        {comparison.sources.length > 0 && (
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Comparison sources
-            </p>
-
-            <div className="flex flex-wrap gap-2">
-              {comparison.sources.map((source) => (
-                <a
-                  key={source.url}
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-400 transition hover:border-blue-500/30 hover:text-blue-300"
-                >
-                  <span className="truncate">{source.title}</span>
-                  <ExternalLink className="size-3 shrink-0" />
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {comparison.limitations.length > 0 && (
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-400">
-              Comparison limitations
-            </p>
-
-            <ul className="space-y-1">
-              {comparison.limitations.map((limitation, index) => (
-                <li
-                  key={`${comparison.id}-limitation-${index}`}
-                  className="text-xs leading-5 text-slate-400"
-                >
-                  • {limitation}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </article>
-  );
-}
-
-export default function CompetitorResearchPanel({
+export function CompetitorResearchPanel({
   competitorId,
   competitorName,
-}: Props) {
+}: CompetitorResearchPanelProps) {
   const [snapshots, setSnapshots] = useState<CompetitorSnapshot[]>([]);
-  const [pagination, setPagination] = useState<Pagination | null>(null);
+  const [snapshotPagination, setSnapshotPagination] =
+    useState<Pagination | null>(null);
 
   const [comparisons, setComparisons] = useState<CompetitorComparison[]>([]);
+  const [comparisonPagination, setComparisonPagination] =
+    useState<Pagination | null>(null);
+
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(true);
   const [isLoadingComparisons, setIsLoadingComparisons] = useState(true);
-  const [comparisonError, setComparisonError] = useState<string | null>(null);
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMoreSnapshots, setIsLoadingMoreSnapshots] = useState(false);
+  const [isLoadingMoreComparisons, setIsLoadingMoreComparisons] =
+    useState(false);
+
   const [isResearching, setIsResearching] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  const [error, setError] = useState<string | null>(null);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [researchError, setResearchError] = useState<string | null>(null);
+
+  const snapshotRequestId = useRef(0);
+  const comparisonRequestId = useRef(0);
+  const researchRequestId = useRef(0);
+
+  const snapshotController = useRef<AbortController | null>(null);
+  const comparisonController = useRef<AbortController | null>(null);
+  const researchController = useRef<AbortController | null>(null);
+
+  const researchInFlight = useRef(false);
 
   const fetchSnapshots = useCallback(
-    async (
-      offset = 0,
-      append = false,
-      showLoading = true,
-      signal?: AbortSignal
-    ) => {
+    async (offset = 0, append = false) => {
+      snapshotController.current?.abort();
+
+      const controller = new AbortController();
+      snapshotController.current = controller;
+
+      const requestId = ++snapshotRequestId.current;
+
+      if (append) {
+        setIsLoadingMoreSnapshots(true);
+      } else {
+        setIsLoadingMoreSnapshots(false);
+        setIsLoadingSnapshots(true);
+      }
+
+      setSnapshotError(null);
+
       try {
-        // Defer state updates until after the effect's synchronous execution.
-        await Promise.resolve();
-
-        if (signal?.aborted) return;
-
-        if (showLoading) {
-          if (append) {
-            setIsLoadingMore(true);
-          } else {
-            setIsLoading(true);
-          }
-        }
+        const params = new URLSearchParams({
+          limit: String(SNAPSHOT_PAGE_SIZE),
+          offset: String(offset),
+        });
 
         const response = await fetch(
-          `/api/competitors/${competitorId}/snapshots?limit=10&offset=${offset}`,
-          { cache: "no-store", signal }
+          `/api/competitors/${encodeURIComponent(
+            competitorId
+          )}/snapshots?${params.toString()}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
         );
 
-        const data = await response.json();
+        const data = await readJson(response);
 
         if (!response.ok) {
-          throw new Error(data.error || "Failed to load research history.");
+          throw new Error(
+            getApiError(data, "Unable to load research history.")
+          );
         }
 
-        if (signal?.aborted) return;
+        const result = parseSnapshotsResponse(data);
 
-        const newSnapshots = data.snapshots as CompetitorSnapshot[];
+        if (
+          result.pagination.offset !== offset ||
+          result.pagination.limit !== SNAPSHOT_PAGE_SIZE
+        ) {
+          throw new Error(
+            "The server returned unexpected research pagination."
+          );
+        }
 
-        setError(null);
+        if (
+          controller.signal.aborted ||
+          requestId !== snapshotRequestId.current
+        ) {
+          return;
+        }
 
-        setSnapshots((previous) =>
-          append ? [...previous, ...newSnapshots] : newSnapshots
+        setSnapshots((current) =>
+          mergeUniqueById(current, result.snapshots, append)
         );
 
-        setPagination(data.pagination as Pagination);
+        setSnapshotPagination(result.pagination);
       } catch (error) {
-        if (signal?.aborted) return;
+        if (
+          controller.signal.aborted ||
+          requestId !== snapshotRequestId.current
+        ) {
+          return;
+        }
 
-        setError(
+        setSnapshotError(
           error instanceof Error
             ? error.message
-            : "Something went wrong while loading research."
+            : "Unable to load research history."
         );
       } finally {
-        if (!signal?.aborted) {
-          setIsLoading(false);
-          setIsLoadingMore(false);
+        if (requestId === snapshotRequestId.current) {
+          if (append) {
+            setIsLoadingMoreSnapshots(false);
+          } else {
+            setIsLoadingSnapshots(false);
+          }
+
+          if (snapshotController.current === controller) {
+            snapshotController.current = null;
+          }
         }
       }
     },
@@ -424,45 +174,95 @@ export default function CompetitorResearchPanel({
   );
 
   const fetchComparisons = useCallback(
-    async (showLoading = true, signal?: AbortSignal) => {
+    async (offset = 0, append = false) => {
+      comparisonController.current?.abort();
+
+      const controller = new AbortController();
+      comparisonController.current = controller;
+
+      const requestId = ++comparisonRequestId.current;
+
+      if (append) {
+        setIsLoadingMoreComparisons(true);
+      } else {
+        setIsLoadingMoreComparisons(false);
+        setIsLoadingComparisons(true);
+      }
+
+      setComparisonError(null);
+
       try {
-        // Defer state updates until after the effect's synchronous execution.
-        await Promise.resolve();
-
-        if (signal?.aborted) return;
-
-        if (showLoading) {
-          setIsLoadingComparisons(true);
-        }
+        const params = new URLSearchParams({
+          limit: String(COMPARISON_PAGE_SIZE),
+          offset: String(offset),
+        });
 
         const response = await fetch(
-          `/api/competitors/${competitorId}/comparisons?limit=20&offset=0`,
-          { cache: "no-store", signal }
+          `/api/competitors/${encodeURIComponent(
+            competitorId
+          )}/comparisons?${params.toString()}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
         );
 
-        const data = await response.json();
+        const data = await readJson(response);
 
         if (!response.ok) {
           throw new Error(
-            data.error || "Failed to load competitor change history."
+            getApiError(data, "Unable to load comparison history.")
           );
         }
 
-        if (signal?.aborted) return;
+        const result = parseComparisonsResponse(data);
 
-        setComparisonError(null);
-        setComparisons(data.comparisons as CompetitorComparison[]);
+        if (
+          result.pagination.offset !== offset ||
+          result.pagination.limit !== COMPARISON_PAGE_SIZE
+        ) {
+          throw new Error(
+            "The server returned unexpected comparison pagination."
+          );
+        }
+
+        if (
+          controller.signal.aborted ||
+          requestId !== comparisonRequestId.current
+        ) {
+          return;
+        }
+
+        setComparisons((current) =>
+          mergeUniqueById(current, result.comparisons, append)
+        );
+
+        setComparisonPagination(result.pagination);
       } catch (error) {
-        if (signal?.aborted) return;
+        if (
+          controller.signal.aborted ||
+          requestId !== comparisonRequestId.current
+        ) {
+          return;
+        }
 
         setComparisonError(
           error instanceof Error
             ? error.message
-            : "Something went wrong while loading change history."
+            : "Unable to load comparison history."
         );
       } finally {
-        if (!signal?.aborted) {
-          setIsLoadingComparisons(false);
+        if (requestId === comparisonRequestId.current) {
+          if (append) {
+            setIsLoadingMoreComparisons(false);
+          } else {
+            setIsLoadingComparisons(false);
+          }
+
+          if (comparisonController.current === controller) {
+            comparisonController.current = null;
+          }
         }
       }
     },
@@ -470,506 +270,319 @@ export default function CompetitorResearchPanel({
   );
 
   useEffect(() => {
-    const controller = new AbortController();
-
     const timeoutId = window.setTimeout(() => {
-      void fetchSnapshots(0, false, false, controller.signal);
-      void fetchComparisons(false, controller.signal);
+      setSnapshots([]);
+      setSnapshotPagination(null);
+      setComparisons([]);
+      setComparisonPagination(null);
+
+      setSnapshotError(null);
+      setComparisonError(null);
+      setResearchError(null);
+
+      setIsLoadingSnapshots(true);
+      setIsLoadingComparisons(true);
+      setIsLoadingMoreSnapshots(false);
+      setIsLoadingMoreComparisons(false);
+      setIsResearching(false);
+
+      void fetchSnapshots();
+      void fetchComparisons();
     }, 0);
 
     return () => {
       window.clearTimeout(timeoutId);
-      controller.abort();
+
+      snapshotController.current?.abort();
+      comparisonController.current?.abort();
+      researchController.current?.abort();
+
+      snapshotRequestId.current += 1;
+      comparisonRequestId.current += 1;
+      researchRequestId.current += 1;
+
+      researchInFlight.current = false;
     };
   }, [fetchSnapshots, fetchComparisons]);
 
-  const handleResearch = async () => {
-    try {
-      setIsResearching(true);
-      setError(null);
+  const handleResearch = useCallback(async () => {
+    if (researchInFlight.current) {
+      return;
+    }
 
+    researchInFlight.current = true;
+
+    researchController.current?.abort();
+
+    const controller = new AbortController();
+    researchController.current = controller;
+
+    const requestId = ++researchRequestId.current;
+
+    setIsResearching(true);
+    setResearchError(null);
+
+    try {
       const response = await fetch(
-        `/api/competitors/${competitorId}/snapshots`,
+        `/api/competitors/${encodeURIComponent(competitorId)}/snapshots`,
         {
           method: "POST",
+          cache: "no-store",
+          signal: controller.signal,
         }
       );
 
-      const data = await response.json();
+      const data = await readJson(response);
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Failed to complete competitor research."
+          getApiError(data, "Unable to run competitor research.")
         );
       }
 
-      setIsLoading(true);
-      setIsLoadingComparisons(true);
-      setComparisonError(null);
+      if (
+        controller.signal.aborted ||
+        requestId !== researchRequestId.current
+      ) {
+        return;
+      }
 
-      // Refresh both research snapshots and detected changes.
+      if (!isRecord(data)) {
+        throw new Error("The server returned an invalid research result.");
+      }
+
+      const savedSnapshot = parseSnapshot(data.snapshot);
+
+      if (!savedSnapshot) {
+        throw new Error("The server returned an invalid research snapshot.");
+      }
+
       await Promise.all([fetchSnapshots(), fetchComparisons()]);
     } catch (error) {
-      setError(
+      if (
+        controller.signal.aborted ||
+        requestId !== researchRequestId.current
+      ) {
+        return;
+      }
+
+      setResearchError(
         error instanceof Error
           ? error.message
-          : "Something went wrong during competitor research."
+          : "Unable to run competitor research."
       );
     } finally {
-      setIsResearching(false);
+      if (requestId === researchRequestId.current) {
+        researchInFlight.current = false;
+        setIsResearching(false);
+
+        if (researchController.current === controller) {
+          researchController.current = null;
+        }
+      }
     }
-  };
+  }, [competitorId, fetchSnapshots, fetchComparisons]);
 
-  const handleRefreshComparisons = () => {
-    setIsLoadingComparisons(true);
-    setComparisonError(null);
-    void fetchComparisons(false);
-  };
+  const handleRefreshSnapshots = useCallback(() => {
+    void fetchSnapshots();
+  }, [fetchSnapshots]);
 
-  const handleLoadMore = () => {
+  const handleRefreshComparisons = useCallback(() => {
+    void fetchComparisons();
+  }, [fetchComparisons]);
+
+  const handleLoadMoreSnapshots = useCallback(() => {
     if (
-      pagination?.nextOffset === null ||
-      pagination?.nextOffset === undefined
+      isLoadingSnapshots ||
+      isLoadingMoreSnapshots ||
+      !snapshotPagination?.hasMore ||
+      snapshotPagination.nextOffset === null
     ) {
       return;
     }
 
-    setIsLoadingMore(true);
-    void fetchSnapshots(pagination.nextOffset, true, false);
-  };
+    void fetchSnapshots(snapshotPagination.nextOffset, true);
+  }, [
+    fetchSnapshots,
+    isLoadingSnapshots,
+    isLoadingMoreSnapshots,
+    snapshotPagination,
+  ]);
 
-  const latestSnapshot = snapshots[0];
+  const handleLoadMoreComparisons = useCallback(() => {
+    if (
+      isLoadingComparisons ||
+      isLoadingMoreComparisons ||
+      !comparisonPagination?.hasMore ||
+      comparisonPagination.nextOffset === null
+    ) {
+      return;
+    }
+
+    void fetchComparisons(comparisonPagination.nextOffset, true);
+  }, [
+    fetchComparisons,
+    isLoadingComparisons,
+    isLoadingMoreComparisons,
+    comparisonPagination,
+  ]);
+
+  const latestSnapshot = snapshots[0] ?? null;
 
   return (
     <section className="space-y-8">
-      {/* Research header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <Sparkles className="size-5 text-blue-400" />
-
-            <h2 className="text-lg font-semibold text-white">
-              AI Competitor Intelligence
-            </h2>
+      <div className="flex flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-500/20 bg-violet-500/10">
+            <Sparkles className="h-5 w-5 text-violet-400" aria-hidden="true" />
           </div>
 
-          <p className="mt-1 text-sm text-slate-500">
-            Research current developments, positioning, products, pricing,
-            strengths, and competitive opportunities.
-          </p>
+          <div>
+            <h2 className="text-base font-semibold text-white">
+              AI Competitor Intelligence
+            </h2>
+
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Research {competitorName}, identify strategic insights, and track
+              changes over time.
+            </p>
+          </div>
         </div>
 
         <button
           type="button"
           onClick={handleResearch}
           disabled={isResearching}
-          className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          aria-busy={isResearching}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isResearching ? (
             <>
-              <LoaderCircle className="size-4 animate-spin" />
+              <LoaderCircle
+                className="h-4 w-4 animate-spin"
+                aria-hidden="true"
+              />
               Researching...
             </>
           ) : (
             <>
-              <RefreshCw className="size-4" />
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
               Run AI Research
             </>
           )}
         </button>
       </div>
 
-      {/* Research progress */}
       {isResearching && (
         <div
-          className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5"
           role="status"
           aria-live="polite"
+          className="flex items-start gap-3 rounded-xl border border-violet-500/20 bg-violet-500/5 p-4"
         >
-          <div className="flex items-center gap-3">
-            <LoaderCircle className="size-5 animate-spin text-blue-400" />
+          <LoaderCircle
+            className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-violet-400"
+            aria-hidden="true"
+          />
 
-            <div>
-              <p className="text-sm font-semibold text-blue-300">
-                Analyzing {competitorName}
-              </p>
+          <div>
+            <p className="text-sm font-medium text-violet-200">
+              Competitor research in progress
+            </p>
 
-              <p className="mt-1 text-xs text-slate-400">
-                Gathering information and generating strategic insights. This
-                may take a little while.
-              </p>
-            </div>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Gathering and analyzing available information. This may take a few
+              moments.
+            </p>
           </div>
         </div>
       )}
 
-      {/* Research error */}
-      {error && (
+      {researchError && (
         <div
-          className="flex items-start gap-3 rounded-xl border border-rose-500/20 bg-rose-500/5 p-4"
           role="alert"
+          className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4"
         >
-          <AlertCircle className="mt-0.5 size-5 shrink-0 text-rose-400" />
-          <p className="text-sm text-rose-300">{error}</p>
+          <AlertCircle
+            className="mt-0.5 h-5 w-5 shrink-0 text-red-400"
+            aria-hidden="true"
+          />
+
+          <div>
+            <p className="text-sm font-medium text-red-300">Research failed</p>
+
+            <p className="mt-1 text-sm leading-6 text-red-400/80">
+              {researchError}
+            </p>
+          </div>
         </div>
       )}
 
-      {/* Latest research */}
-      {latestSnapshot && (
-        <div className="space-y-5 rounded-2xl border border-blue-500/20 bg-slate-950/70 p-5 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Sparkles className="size-4 text-blue-400" />
-              <h3 className="font-semibold text-white">Latest AI analysis</h3>
-            </div>
+      {latestSnapshot && !isLoadingSnapshots && (
+        <LatestSnapshot snapshot={latestSnapshot} />
+      )}
 
-            <span className="text-xs text-slate-500">
-              {formatDate(latestSnapshot.createdAt)}
-            </span>
+      {!latestSnapshot && isLoadingSnapshots && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+          <div className="mb-4 h-5 w-48 animate-pulse rounded bg-slate-800" />
+          <div className="space-y-2">
+            <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
+            <div className="h-4 w-5/6 animate-pulse rounded bg-slate-800" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-slate-800" />
           </div>
-
-          <div>
-            <h4 className="mb-2 text-sm font-semibold text-slate-300">
-              Executive summary
-            </h4>
-
-            <p className="whitespace-pre-line text-sm leading-7 text-slate-400">
-              {latestSnapshot.summary}
-            </p>
-          </div>
-
-          {/* Key insights */}
-          {latestSnapshot.keyInsights.length > 0 && (
-            <div>
-              <h4 className="mb-3 text-sm font-semibold text-white">
-                Key strategic insights
-              </h4>
-
-              <ul className="space-y-2">
-                {latestSnapshot.keyInsights.map((insight, index) => (
-                  <li
-                    key={`${latestSnapshot.id}-insight-${index}`}
-                    className="flex gap-3 text-sm leading-6 text-slate-300"
-                  >
-                    <span className="mt-2 size-1.5 shrink-0 rounded-full bg-blue-400" />
-                    {insight}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Findings */}
-          {latestSnapshot.findings.length > 0 && (
-            <div>
-              <h4 className="mb-3 text-sm font-semibold text-white">
-                Research findings
-              </h4>
-
-              <div className="space-y-3">
-                {latestSnapshot.findings.map((finding, index) => (
-                  <article
-                    key={`${latestSnapshot.id}-finding-${index}`}
-                    className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h5 className="text-sm font-semibold text-slate-200">
-                        {finding.title}
-                      </h5>
-
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase ${
-                          importanceStyles[finding.importance]
-                        }`}
-                      >
-                        {finding.importance} importance
-                      </span>
-                    </div>
-
-                    <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-400">
-                      {finding.description}
-                    </p>
-
-                    {finding.sources.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-3">
-                        {finding.sources.map((source) => (
-                          <a
-                            key={source.url}
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-blue-400 transition hover:text-blue-300"
-                          >
-                            {source.title}
-                            <ExternalLink className="size-3" />
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Sources */}
-          {latestSnapshot.sources.length > 0 && (
-            <div>
-              <h4 className="mb-3 text-sm font-semibold text-white">
-                Research sources
-              </h4>
-
-              <div className="flex flex-wrap gap-2">
-                {latestSnapshot.sources.map((source) => (
-                  <a
-                    key={source.url}
-                    href={source.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-400 transition hover:border-blue-500/30 hover:text-blue-300"
-                  >
-                    <span className="truncate">{source.title}</span>
-                    <ExternalLink className="size-3 shrink-0" />
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Limitations */}
-          {latestSnapshot.limitations.length > 0 && (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-              <h4 className="mb-2 text-sm font-semibold text-amber-400">
-                Research limitations
-              </h4>
-
-              <ul className="space-y-1">
-                {latestSnapshot.limitations.map((limitation, index) => (
-                  <li
-                    key={`${latestSnapshot.id}-limitation-${index}`}
-                    className="text-sm leading-6 text-slate-400"
-                  >
-                    • {limitation}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Tools */}
-          {latestSnapshot.toolsUsed.length > 0 && (
-            <p className="text-xs text-slate-500">
-              Tools used: {latestSnapshot.toolsUsed.join(", ")}
-            </p>
-          )}
         </div>
       )}
 
-      {/* Competitor change history */}
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <GitBranch className="size-5 text-purple-400" />
-
-              <h3 className="font-semibold text-white">
-                Competitor Change Detection
-              </h3>
-
-              <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs text-slate-400">
-                {comparisons.length}
-              </span>
-            </div>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Track meaningful changes in {competitorName}&apos;s competitive
-              position over time.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleRefreshComparisons}
-            disabled={isLoadingComparisons}
-            aria-label="Refresh competitor change history"
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-2 text-xs font-medium text-slate-400 transition hover:border-blue-500/30 hover:text-white disabled:opacity-50"
-          >
-            <RefreshCw
-              className={`size-3.5 ${
-                isLoadingComparisons ? "animate-spin" : ""
-              }`}
+      {!latestSnapshot && snapshotError && !isLoadingSnapshots && (
+        <div
+          role="alert"
+          className="flex flex-col gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-3">
+            <AlertCircle
+              className="mt-0.5 h-4 w-4 shrink-0 text-red-400"
+              aria-hidden="true"
             />
-            Refresh
-          </button>
-        </div>
-
-        {comparisonError && (
-          <div
-            className="flex items-start gap-3 rounded-xl border border-rose-500/20 bg-rose-500/5 p-4"
-            role="alert"
-          >
-            <AlertCircle className="mt-0.5 size-5 shrink-0 text-rose-400" />
 
             <div>
-              <p className="text-sm text-rose-300">{comparisonError}</p>
-
-              <button
-                type="button"
-                onClick={handleRefreshComparisons}
-                className="mt-2 text-xs font-medium text-blue-400 hover:text-blue-300"
-              >
-                Try again
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isLoadingComparisons ? (
-          <div className="space-y-3">
-            {[1, 2].map((item) => (
-              <div
-                key={item}
-                className="h-32 animate-pulse rounded-xl border border-slate-800 bg-slate-900/50"
-              />
-            ))}
-          </div>
-        ) : !comparisonError && comparisons.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 px-5 py-10 text-center">
-            <div className="mx-auto flex size-12 items-center justify-center rounded-2xl border border-purple-500/20 bg-purple-500/5">
-              <GitBranch className="size-6 text-purple-400" />
-            </div>
-
-            <h4 className="mt-4 text-sm font-semibold text-slate-200">
-              No competitor changes detected yet
-            </h4>
-
-            <p className="mx-auto mt-2 max-w-md text-xs leading-6 text-slate-500">
-              Your first research run establishes a baseline. Run AI research
-              again to compare the latest findings and detect meaningful
-              competitive changes.
-            </p>
-
-            {snapshots.length < 2 && (
-              <p className="mt-3 inline-flex items-center gap-2 text-xs text-blue-400">
-                <Zap className="size-3.5" />
-                {snapshots.length === 0
-                  ? "Start with your first research snapshot"
-                  : "Run research again to create your first comparison"}
+              <p className="text-sm font-medium text-red-300">
+                Unable to load the latest research
               </p>
-            )}
+              <p className="mt-1 text-sm text-red-400/80">{snapshotError}</p>
+            </div>
           </div>
-        ) : (
-          <div className="ml-2">
-            {comparisons.map((comparison) => (
-              <ComparisonCard key={comparison.id} comparison={comparison} />
-            ))}
-          </div>
-        )}
-      </div>
 
-      {/* Research history */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Clock3 className="size-5 text-slate-400" />
-
-          <h3 className="font-semibold text-white">Research history</h3>
-
-          <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs text-slate-400">
-            {snapshots.length}
-          </span>
-        </div>
-
-        {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((item) => (
-              <div
-                key={item}
-                className="h-20 animate-pulse rounded-xl border border-slate-800 bg-slate-900/50"
-              />
-            ))}
-          </div>
-        ) : snapshots.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 px-5 py-10 text-center">
-            <Clock3 className="mx-auto size-8 text-slate-600" />
-
-            <p className="mt-3 text-sm font-medium text-slate-300">
-              No research history yet
-            </p>
-
-            <p className="mt-1 text-xs text-slate-500">
-              Run your first AI analysis to start tracking this competitor.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {snapshots.map((snapshot, index) => (
-              <details
-                key={snapshot.id}
-                className="group rounded-xl border border-slate-800 bg-slate-950/50"
-                open={index === 0}
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-200">
-                      {index === 0 ? "Latest research" : "Research snapshot"}
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formatDate(snapshot.createdAt)}
-                    </p>
-
-                    <p className="mt-2 line-clamp-2 text-sm text-slate-400">
-                      {snapshot.summary}
-                    </p>
-                  </div>
-
-                  <span className="shrink-0 text-xs text-slate-500 transition group-open:rotate-180">
-                    ▼
-                  </span>
-                </summary>
-
-                <div className="border-t border-slate-800 p-4">
-                  <p className="whitespace-pre-line text-sm leading-7 text-slate-400">
-                    {snapshot.summary}
-                  </p>
-
-                  {snapshot.keyInsights.length > 0 && (
-                    <div className="mt-4">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                        Key insights
-                      </p>
-
-                      <ul className="space-y-2">
-                        {snapshot.keyInsights.map((insight, insightIndex) => (
-                          <li
-                            key={`${snapshot.id}-history-${insightIndex}`}
-                            className="text-sm text-slate-400"
-                          >
-                            • {insight}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </details>
-            ))}
-          </div>
-        )}
-
-        {pagination?.hasMore && (
           <button
             type="button"
-            onClick={handleLoadMore}
-            disabled={isLoadingMore}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-blue-500/30 hover:bg-blue-500/5 disabled:opacity-50"
+            onClick={handleRefreshSnapshots}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10"
           >
-            {isLoadingMore && <LoaderCircle className="size-4 animate-spin" />}
-
-            {isLoadingMore ? "Loading..." : "Load more research"}
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            Retry
           </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      <ChangeHistory
+        comparisons={comparisons}
+        pagination={comparisonPagination}
+        isLoading={isLoadingComparisons}
+        isLoadingMore={isLoadingMoreComparisons}
+        error={comparisonError}
+        competitorName={competitorName}
+        snapshotCount={snapshots.length}
+        onRefresh={handleRefreshComparisons}
+        onLoadMore={handleLoadMoreComparisons}
+      />
+
+      <ResearchHistory
+        snapshots={snapshots}
+        pagination={snapshotPagination}
+        isLoading={isLoadingSnapshots}
+        isLoadingMore={isLoadingMoreSnapshots}
+        error={snapshotError}
+        onRefresh={handleRefreshSnapshots}
+        onLoadMore={handleLoadMoreSnapshots}
+      />
     </section>
   );
 }

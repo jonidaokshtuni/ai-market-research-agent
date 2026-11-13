@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { db } from "@/db";
 import { competitors } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 const UpdateCompetitorSchema = z
   .object({
@@ -20,22 +22,48 @@ const UpdateCompetitorSchema = z
   })
   .partial();
 
+const CompetitorIdSchema = z.string().uuid();
+
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-// PATCH: Update a competitor
+async function getAuthorizedContext() {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return {
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const workspace = await getActiveWorkspace(user.id);
+
+  if (!workspace) {
+    return {
+      error: NextResponse.json(
+        { error: "No active workspace" },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { user, workspace };
+}
+
+// PATCH: Update a competitor within the active workspace.
 export async function PATCH(request: Request, { params }: RouteContext) {
   try {
-    const user = await getCurrentUser();
+    const context = await getAuthorizedContext();
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if ("error" in context) {
+      return context.error;
     }
 
+    const { workspace } = context;
     const { id } = await params;
 
-    if (!z.string().uuid().safeParse(id).success) {
+    if (!CompetitorIdSchema.safeParse(id).success) {
       return NextResponse.json(
         { error: "Invalid competitor ID" },
         { status: 400 }
@@ -68,7 +96,12 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         ...validation.data,
         updatedAt: new Date(),
       })
-      .where(and(eq(competitors.id, id), eq(competitors.userId, user.id)))
+      .where(
+        and(
+          eq(competitors.id, id),
+          eq(competitors.organizationId, workspace.id)
+        )
+      )
       .returning();
 
     if (!updated) {
@@ -89,27 +122,38 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   }
 }
 
-// DELETE: Remove a competitor
+// DELETE: Members can delete their own competitors.
+// Owners and admins can delete any competitor in their workspace.
 export async function DELETE(_request: Request, { params }: RouteContext) {
   try {
-    const user = await getCurrentUser();
+    const context = await getAuthorizedContext();
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if ("error" in context) {
+      return context.error;
     }
 
+    const { user, workspace } = context;
     const { id } = await params;
 
-    if (!z.string().uuid().safeParse(id).success) {
+    if (!CompetitorIdSchema.safeParse(id).success) {
       return NextResponse.json(
         { error: "Invalid competitor ID" },
         { status: 400 }
       );
     }
 
+    const conditions = [
+      eq(competitors.id, id),
+      eq(competitors.organizationId, workspace.id),
+    ];
+
+    if (workspace.role === "member") {
+      conditions.push(eq(competitors.userId, user.id));
+    }
+
     const [deleted] = await db
       .delete(competitors)
-      .where(and(eq(competitors.id, id), eq(competitors.userId, user.id)))
+      .where(and(...conditions))
       .returning({ id: competitors.id });
 
     if (!deleted) {

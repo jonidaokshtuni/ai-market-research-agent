@@ -1,9 +1,9 @@
 import { Suspense } from "react";
-import { getCurrentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { getDashboardStats } from "@/lib/dashboard/queries";
 
-import { getResearchHistory } from "@/lib/dashboard/queries";
+import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
+import { getDashboardStats, getResearchHistory } from "@/lib/dashboard/queries";
 import ResearchHistoryTable from "@/components/dashboard/research-history-table";
 
 async function DashboardContent() {
@@ -13,14 +13,27 @@ async function DashboardContent() {
     redirect("/login");
   }
 
-  const stats = await getDashboardStats(user.id);
-  const researchHistory = await getResearchHistory(user.id);
+  const workspace = await getActiveWorkspace(user.id);
+
+  if (!workspace) {
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-white">
+        <h1 className="text-xl font-semibold">No workspace available</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          Join or create a workspace to start viewing research activity.
+        </p>
+      </div>
+    );
+  }
+
+  const stats = await getDashboardStats(workspace.id);
+  const researchHistory = await getResearchHistory(workspace.id);
 
   const cards = [
     {
       title: "Research Sessions",
       value: stats.totalSessions,
-      description: "Total research sessions",
+      description: "Total workspace research sessions",
     },
     {
       title: "Reports Generated",
@@ -45,7 +58,7 @@ async function DashboardContent() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="mt-2 text-slate-400">
-            Overview of your market research activity.
+            Overview of {workspace.name} research activity.
           </p>
         </div>
 
@@ -67,13 +80,13 @@ async function DashboardContent() {
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
           <h2 className="text-lg font-semibold">Recent Research Activity</h2>
           <p className="mt-2 text-sm text-slate-400">
-            Your research activity over the last 30 days.
+            Workspace research activity over the last 30 days.
           </p>
 
           {stats.activity.length === 0 ? (
             <p className="mt-6 text-sm text-slate-500">
-              No research activity yet. Start a research session to see your
-              activity here.
+              No research activity yet. Start a research session to see activity
+              here.
             </p>
           ) : (
             <div className="mt-6 space-y-3">
@@ -91,6 +104,7 @@ async function DashboardContent() {
             </div>
           )}
         </section>
+
         <ResearchHistoryTable data={researchHistory} />
       </div>
     </div>

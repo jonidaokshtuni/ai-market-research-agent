@@ -50,8 +50,7 @@ export default function CompetitorList({
       switch (sortBy) {
         case "oldest":
           return (
-            new Date(a.createdAt ?? 0).getTime() -
-            new Date(b.createdAt ?? 0).getTime()
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
           );
 
         case "name":
@@ -66,8 +65,7 @@ export default function CompetitorList({
         case "newest":
         default:
           return (
-            new Date(b.createdAt ?? 0).getTime() -
-            new Date(a.createdAt ?? 0).getTime()
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
           );
       }
     });
@@ -250,14 +248,14 @@ export default function CompetitorList({
           aria-label="Competitor pagination"
           className="flex flex-col gap-3 border-t border-slate-800 pt-5 sm:flex-row sm:items-center sm:justify-between"
         >
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-slate-400" aria-live="polite">
             Page {currentPage} of {totalPages}
           </p>
 
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              onClick={() => setPage(Math.max(1, currentPage - 1))}
               disabled={currentPage === 1}
               className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -266,9 +264,7 @@ export default function CompetitorList({
 
             <button
               type="button"
-              onClick={() =>
-                setPage((current) => Math.min(totalPages, current + 1))
-              }
+              onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage === totalPages}
               className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             >

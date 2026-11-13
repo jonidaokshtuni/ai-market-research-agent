@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { SyntheticEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
+
 import {
   EMPTY_COMPETITOR_FORM,
   COMPETITOR_INDUSTRY_OPTIONS,
   COMPETITOR_SCORE_MIN,
   COMPETITOR_SCORE_MAX,
 } from "./constants";
+
 import type { Competitor, CompetitorFormValues } from "./types";
 
 type CompetitorFormProps = {
@@ -52,9 +54,12 @@ export default function CompetitorForm({
   const [form, setForm] = useState<CompetitorFormValues>(() =>
     getInitialFormValues(competitor)
   );
+
   const [validationError, setValidationError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isEditing = Boolean(competitor);
+  const isBusy = isSaving || isSubmitting;
 
   function updateField<K extends keyof CompetitorFormValues>(
     field: K,
@@ -64,25 +69,58 @@ export default function CompetitorForm({
       ...current,
       [field]: value,
     }));
+
+    if (validationError) {
+      setValidationError("");
+    }
   }
 
-  async function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
+  function handleTextChange(
+    field: keyof Pick<
+      CompetitorFormValues,
+      | "name"
+      | "website"
+      | "industry"
+      | "description"
+      | "products"
+      | "pricing"
+      | "strengths"
+      | "weaknesses"
+    >,
+    event: ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >
+  ) {
+    updateField(field, event.target.value);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isBusy) {
+      return;
+    }
+
     setValidationError("");
 
     const name = form.name.trim();
+    const websiteValue = form.website.trim();
 
     if (!name) {
       setValidationError("Company name is required.");
       return;
     }
 
-    if (form.website.trim()) {
+    if (websiteValue) {
       try {
-        const website = new URL(form.website.trim());
+        const website = new URL(websiteValue);
 
         if (!["http:", "https:"].includes(website.protocol)) {
           throw new Error("Invalid protocol");
+        }
+
+        if (!website.hostname.includes(".")) {
+          throw new Error("Invalid hostname");
         }
       } catch {
         setValidationError(
@@ -92,17 +130,29 @@ export default function CompetitorForm({
       }
     }
 
-    await onSubmit({
+    const values: CompetitorFormValues = {
       ...form,
       name,
-      website: form.website.trim(),
+      website: websiteValue,
       industry: form.industry.trim(),
       description: form.description.trim(),
       products: form.products.trim(),
       pricing: form.pricing.trim(),
       strengths: form.strengths.trim(),
       weaknesses: form.weaknesses.trim(),
-    });
+    };
+
+    setIsSubmitting(true);
+
+    try {
+      await onSubmit(values);
+    } catch {
+      setValidationError(
+        "Something went wrong while saving. Please try again."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -136,12 +186,13 @@ export default function CompetitorForm({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-7 p-5 sm:p-7">
-        <fieldset disabled={isSaving} className="space-y-7">
+        <fieldset disabled={isBusy} className="space-y-7">
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-semibold text-white">
                 Company information
               </h3>
+
               <p className="mt-1 text-xs text-slate-500">
                 Basic details about the company.
               </p>
@@ -152,14 +203,16 @@ export default function CompetitorForm({
                 <label htmlFor="competitor-name" className={labelClass}>
                   Company name <span className="text-red-400">*</span>
                 </label>
+
                 <input
                   id="competitor-name"
+                  name="name"
                   required
                   maxLength={150}
                   className={inputClass}
                   placeholder="e.g. Acme Inc."
                   value={form.name}
-                  onChange={(event) => updateField("name", event.target.value)}
+                  onChange={(event) => handleTextChange("name", event)}
                 />
               </div>
 
@@ -167,16 +220,16 @@ export default function CompetitorForm({
                 <label htmlFor="competitor-website" className={labelClass}>
                   Website
                 </label>
+
                 <input
                   id="competitor-website"
+                  name="website"
                   type="url"
                   maxLength={2048}
                   className={inputClass}
                   placeholder="https://example.com"
                   value={form.website}
-                  onChange={(event) =>
-                    updateField("website", event.target.value)
-                  }
+                  onChange={(event) => handleTextChange("website", event)}
                 />
               </div>
 
@@ -184,15 +237,16 @@ export default function CompetitorForm({
                 <label htmlFor="competitor-industry" className={labelClass}>
                   Industry
                 </label>
+
                 <select
                   id="competitor-industry"
+                  name="industry"
                   className={inputClass}
                   value={form.industry}
-                  onChange={(event) =>
-                    updateField("industry", event.target.value)
-                  }
+                  onChange={(event) => handleTextChange("industry", event)}
                 >
                   <option value="">Select an industry</option>
+
                   {COMPETITOR_INDUSTRY_OPTIONS.map((industry) => (
                     <option key={industry} value={industry}>
                       {industry}
@@ -205,15 +259,15 @@ export default function CompetitorForm({
                 <label htmlFor="competitor-products" className={labelClass}>
                   Products and services
                 </label>
+
                 <input
                   id="competitor-products"
+                  name="products"
                   maxLength={5000}
                   className={inputClass}
                   placeholder="Main products or services"
                   value={form.products}
-                  onChange={(event) =>
-                    updateField("products", event.target.value)
-                  }
+                  onChange={(event) => handleTextChange("products", event)}
                 />
               </div>
             </div>
@@ -222,16 +276,16 @@ export default function CompetitorForm({
               <label htmlFor="competitor-description" className={labelClass}>
                 Company description
               </label>
+
               <textarea
                 id="competitor-description"
+                name="description"
                 rows={3}
                 maxLength={5000}
                 className={inputClass}
                 placeholder="Describe the company, target market and positioning..."
                 value={form.description}
-                onChange={(event) =>
-                  updateField("description", event.target.value)
-                }
+                onChange={(event) => handleTextChange("description", event)}
               />
             </div>
           </div>
@@ -240,6 +294,7 @@ export default function CompetitorForm({
             <h3 className="text-sm font-semibold text-white">
               Commercial intelligence
             </h3>
+
             <p className="mb-4 mt-1 text-xs text-slate-500">
               Document the company&apos;s commercial strategy.
             </p>
@@ -247,14 +302,16 @@ export default function CompetitorForm({
             <label htmlFor="competitor-pricing" className={labelClass}>
               Pricing strategy
             </label>
+
             <textarea
               id="competitor-pricing"
+              name="pricing"
               rows={3}
               maxLength={3000}
               className={inputClass}
               placeholder="Pricing model, subscriptions, premium tiers..."
               value={form.pricing}
-              onChange={(event) => updateField("pricing", event.target.value)}
+              onChange={(event) => handleTextChange("pricing", event)}
             />
           </div>
 
@@ -262,6 +319,7 @@ export default function CompetitorForm({
             <h3 className="text-sm font-semibold text-white">
               SWOT intelligence
             </h3>
+
             <p className="mb-4 mt-1 text-xs text-slate-500">
               Record known competitive strengths and weaknesses.
             </p>
@@ -271,16 +329,16 @@ export default function CompetitorForm({
                 <label htmlFor="competitor-strengths" className={labelClass}>
                   Strengths
                 </label>
+
                 <textarea
                   id="competitor-strengths"
+                  name="strengths"
                   rows={4}
                   maxLength={5000}
                   className={inputClass}
                   placeholder="Brand recognition, technology, distribution..."
                   value={form.strengths}
-                  onChange={(event) =>
-                    updateField("strengths", event.target.value)
-                  }
+                  onChange={(event) => handleTextChange("strengths", event)}
                 />
               </div>
 
@@ -288,16 +346,16 @@ export default function CompetitorForm({
                 <label htmlFor="competitor-weaknesses" className={labelClass}>
                   Weaknesses
                 </label>
+
                 <textarea
                   id="competitor-weaknesses"
+                  name="weaknesses"
                   rows={4}
                   maxLength={5000}
                   className={inputClass}
                   placeholder="Market gaps, limitations, customer complaints..."
                   value={form.weaknesses}
-                  onChange={(event) =>
-                    updateField("weaknesses", event.target.value)
-                  }
+                  onChange={(event) => handleTextChange("weaknesses", event)}
                 />
               </div>
             </div>
@@ -307,6 +365,7 @@ export default function CompetitorForm({
             <h3 className="text-sm font-semibold text-white">
               Competitive scores
             </h3>
+
             <p className="mb-5 mt-1 text-xs text-slate-500">
               Scores are manually entered estimates, not verified market data.
             </p>
@@ -320,6 +379,7 @@ export default function CompetitorForm({
                   >
                     Market strength
                   </label>
+
                   <span className="text-sm font-semibold tabular-nums text-blue-400">
                     {form.marketStrength}/100
                   </span>
@@ -327,6 +387,7 @@ export default function CompetitorForm({
 
                 <input
                   id="competitor-market-strength"
+                  name="marketStrength"
                   type="range"
                   min={COMPETITOR_SCORE_MIN}
                   max={COMPETITOR_SCORE_MAX}
@@ -337,6 +398,7 @@ export default function CompetitorForm({
                     updateField("marketStrength", Number(event.target.value))
                   }
                 />
+
                 <div className="mt-1 flex justify-between text-xs text-slate-500">
                   <span>Low</span>
                   <span>High</span>
@@ -348,6 +410,7 @@ export default function CompetitorForm({
                   <label htmlFor="competitor-innovation" className={labelClass}>
                     Innovation score
                   </label>
+
                   <span className="text-sm font-semibold tabular-nums text-violet-400">
                     {form.innovationScore}/100
                   </span>
@@ -355,6 +418,7 @@ export default function CompetitorForm({
 
                 <input
                   id="competitor-innovation"
+                  name="innovationScore"
                   type="range"
                   min={COMPETITOR_SCORE_MIN}
                   max={COMPETITOR_SCORE_MAX}
@@ -365,6 +429,7 @@ export default function CompetitorForm({
                     updateField("innovationScore", Number(event.target.value))
                   }
                 />
+
                 <div className="mt-1 flex justify-between text-xs text-slate-500">
                   <span>Low</span>
                   <span>High</span>
@@ -387,7 +452,7 @@ export default function CompetitorForm({
           <button
             type="button"
             onClick={onCancel}
-            disabled={isSaving}
+            disabled={isBusy}
             className="rounded-xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
           >
             Cancel
@@ -395,10 +460,10 @@ export default function CompetitorForm({
 
           <button
             type="submit"
-            disabled={isSaving}
+            disabled={isBusy}
             className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSaving
+            {isBusy
               ? "Saving..."
               : isEditing
               ? "Save changes"

@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { competitors, competitorMonitoring } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -28,15 +29,37 @@ function getNextRunAt(frequency: "daily" | "weekly") {
   return nextRunAt;
 }
 
-// GET: Retrieve monitoring configuration
+async function getAuthorizedContext(id: string) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return { error: "Unauthorized", status: 401 as const };
+  }
+
+  const workspace = await getActiveWorkspace(user.id);
+
+  if (!workspace) {
+    return { error: "No active workspace found", status: 403 as const };
+  }
+
+  const [competitor] = await db
+    .select({ id: competitors.id })
+    .from(competitors)
+    .where(
+      and(eq(competitors.id, id), eq(competitors.organizationId, workspace.id))
+    )
+    .limit(1);
+
+  if (!competitor) {
+    return { error: "Competitor not found", status: 404 as const };
+  }
+
+  return { user, workspace, competitor };
+}
+
+// GET: Retrieve shared monitoring configuration.
 export async function GET(_request: NextRequest, { params }: RouteContext) {
   try {
-    const user = await getCurrentUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { id } = await params;
 
     if (!UUID_REGEX.test(id)) {
@@ -46,28 +69,19 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const [competitor] = await db
-      .select({ id: competitors.id })
-      .from(competitors)
-      .where(and(eq(competitors.id, id), eq(competitors.userId, user.id)))
-      .limit(1);
+    const context = await getAuthorizedContext(id);
 
-    if (!competitor) {
+    if ("error" in context) {
       return NextResponse.json(
-        { error: "Competitor not found" },
-        { status: 404 }
+        { error: context.error },
+        { status: context.status }
       );
     }
 
     const [monitoring] = await db
       .select()
       .from(competitorMonitoring)
-      .where(
-        and(
-          eq(competitorMonitoring.competitorId, id),
-          eq(competitorMonitoring.userId, user.id)
-        )
-      )
+      .where(eq(competitorMonitoring.competitorId, id))
       .limit(1);
 
     return NextResponse.json({
@@ -83,15 +97,9 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
   }
 }
 
-// PUT: Create or update monitoring configuration
+// PUT: Create or update shared monitoring configuration.
 export async function PUT(request: NextRequest, { params }: RouteContext) {
   try {
-    const user = await getCurrentUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { id } = await params;
 
     if (!UUID_REGEX.test(id)) {
@@ -101,18 +109,16 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const [competitor] = await db
-      .select({ id: competitors.id })
-      .from(competitors)
-      .where(and(eq(competitors.id, id), eq(competitors.userId, user.id)))
-      .limit(1);
+    const context = await getAuthorizedContext(id);
 
-    if (!competitor) {
+    if ("error" in context) {
       return NextResponse.json(
-        { error: "Competitor not found" },
-        { status: 404 }
+        { error: context.error },
+        { status: context.status }
       );
     }
+
+    const { user } = context;
 
     let body: unknown;
 
@@ -130,7 +136,6 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
     }
 
     const payload = body as Record<string, unknown>;
-
     const { isEnabled, frequency } = payload;
 
     if (typeof isEnabled !== "boolean") {

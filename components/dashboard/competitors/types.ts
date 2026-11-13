@@ -12,6 +12,7 @@ export type Competitor = {
   innovationScore: number;
   createdAt: string;
   updatedAt: string;
+  canDelete: boolean;
 };
 
 export type CompetitorFormValues = {

@@ -9,8 +9,10 @@ import { db } from "@/db";
 import { organizationInvitations, organizationJoinRequests } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { getUserWorkspaces } from "@/lib/organizations/access";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 
 import WorkspaceNav from "@/components/dashboard/workspace-nav";
+import WorkspaceSwitcher from "@/components/dashboard/workspace-switcher";
 import UserMenu from "@/components/dashboard/user-menu";
 import InvitationPrompt from "@/components/dashboard/invitation-prompt";
 
@@ -86,15 +88,15 @@ async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
     }
   }
 
-  const canManageMembers = workspaces.some(
-    (workspace) => workspace.role === "owner" || workspace.role === "admin"
-  );
+  const activeWorkspace = await getActiveWorkspace(user.id, workspaces);
+
+  const canManageMembers =
+    activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
 
   const displayName = user.name?.trim() || user.email;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Invitation dialog */}
       <InvitationPrompt userEmail={user.email} />
 
       {/* Desktop sidebar */}
@@ -130,17 +132,26 @@ async function WorkspaceContent({ children }: WorkspaceLayoutProps) {
 
       {/* Main content */}
       <div className="min-w-0 md:pl-64">
-        <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b border-white/[0.07] bg-background/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 flex h-20 items-center justify-between gap-3 border-b border-white/[0.07] bg-background/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold tracking-tight text-foreground">
               Market Intelligence
             </p>
             <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">
-              Your research workspace
+              Research and insights
             </p>
           </div>
 
-          <UserMenu name={displayName} email={user.email} />
+          <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
+            {activeWorkspace && (
+              <WorkspaceSwitcher
+                workspaces={workspaces}
+                activeWorkspaceId={activeWorkspace.id}
+              />
+            )}
+
+            <UserMenu name={displayName} email={user.email} />
+          </div>
         </header>
 
         {/* Mobile navigation */}

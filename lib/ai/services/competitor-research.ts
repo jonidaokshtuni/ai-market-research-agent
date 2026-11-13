@@ -12,19 +12,24 @@ import { detectCompetitorChanges } from "@/lib/ai/agents/competitor-change-detec
 
 type RunCompetitorResearchInput = {
   competitorId: string;
+  organizationId: string;
   userId: string;
 };
 
 export async function runAndSaveCompetitorResearch({
   competitorId,
+  organizationId,
   userId,
 }: RunCompetitorResearchInput) {
-  // Retrieve the competitor, enforcing ownership.
+  // Verify that the competitor belongs to the requested workspace.
   const [competitor] = await db
     .select()
     .from(competitors)
     .where(
-      and(eq(competitors.id, competitorId), eq(competitors.userId, userId))
+      and(
+        eq(competitors.id, competitorId),
+        eq(competitors.organizationId, organizationId)
+      )
     )
     .limit(1);
 
@@ -32,21 +37,14 @@ export async function runAndSaveCompetitorResearch({
     return null;
   }
 
-  // Retrieve the most recent previous snapshot.
-  // This must happen before inserting the new snapshot.
+  // Retrieve the latest snapshot across all workspace members.
   const [previousSnapshot] = await db
     .select()
     .from(competitorSnapshots)
-    .where(
-      and(
-        eq(competitorSnapshots.competitorId, competitorId),
-        eq(competitorSnapshots.userId, userId)
-      )
-    )
+    .where(eq(competitorSnapshots.competitorId, competitorId))
     .orderBy(desc(competitorSnapshots.createdAt), desc(competitorSnapshots.id))
     .limit(1);
 
-  // Build a research task using the saved competitor information.
   const researchTask = `
 Conduct an in-depth competitive intelligence investigation
 of the following company.
@@ -88,7 +86,7 @@ RESEARCH REQUIREMENTS
     task: researchTask,
   });
 
-  // Save the completed research as a historical snapshot.
+  // Save the snapshot under the authenticated user who initiated the run.
   const [snapshot] = await db
     .insert(competitorSnapshots)
     .values({
@@ -109,7 +107,7 @@ RESEARCH REQUIREMENTS
     return snapshot;
   }
 
-  // Detect changes without risking the successfully saved research.
+  // Change detection must not invalidate a successfully saved snapshot.
   try {
     const comparison = await detectCompetitorChanges({
       competitorName: competitor.name,
@@ -133,7 +131,6 @@ RESEARCH REQUIREMENTS
       },
     });
 
-    // Persist the comparison between the two snapshots.
     await db.insert(competitorComparisons).values({
       competitorId: competitor.id,
       userId,
@@ -162,6 +159,5 @@ RESEARCH REQUIREMENTS
     );
   }
 
-  // Preserve the existing service return value.
   return snapshot;
 }
