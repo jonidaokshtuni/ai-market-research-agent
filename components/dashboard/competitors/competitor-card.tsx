@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import type { Competitor } from "./types";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import Tooltip from "@/components/ui/tooltip";
@@ -21,7 +22,9 @@ function ScoreBar({
   score: number;
   color: "blue" | "violet";
 }) {
-  const safeScore = Math.min(100, Math.max(0, score));
+  const safeScore = Number.isFinite(score)
+    ? Math.min(100, Math.max(0, score))
+    : 0;
 
   const barColor = color === "blue" ? "bg-blue-500" : "bg-violet-500";
   const textColor = color === "blue" ? "text-blue-400" : "text-violet-400";
@@ -92,8 +95,27 @@ export default function CompetitorCard({
   onDelete,
   isDeleting = false,
 }: CompetitorCardProps) {
+  const safeWebsite = useMemo(() => {
+    if (!competitor.website) return null;
+
+    try {
+      const url = new URL(competitor.website);
+
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return null;
+      }
+
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }, [competitor.website]);
+
   return (
-    <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/70 transition duration-200 hover:border-slate-700 hover:shadow-xl hover:shadow-black/10">
+    <article
+      aria-busy={isDeleting}
+      className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/70 transition duration-200 hover:border-slate-700 hover:shadow-xl hover:shadow-black/10"
+    >
       <div className="flex-1 space-y-5 p-5 sm:p-6">
         {/* Company header */}
         <div className="flex items-start justify-between gap-3">
@@ -119,9 +141,9 @@ export default function CompetitorCard({
         </div>
 
         {/* Website */}
-        {competitor.website && (
+        {safeWebsite && (
           <a
-            href={competitor.website}
+            href={safeWebsite}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex max-w-full items-center gap-2 text-sm text-blue-400 transition hover:text-blue-300"
@@ -204,7 +226,6 @@ export default function CompetitorCard({
 
       {/* Actions */}
       <div className="flex items-center justify-between border-t border-slate-800 bg-slate-900/30 p-4">
-        {/* View profile */}
         <Tooltip content="View the complete competitor profile and its details">
           <Link
             href={`/dashboard/competitors/${competitor.id}`}
@@ -215,7 +236,6 @@ export default function CompetitorCard({
           </Link>
         </Tooltip>
 
-        {/* Edit and Delete */}
         <div className="flex items-center gap-2">
           <Tooltip content="Edit this competitor's information, products, pricing, and scores">
             <button
@@ -239,7 +259,11 @@ export default function CompetitorCard({
                 className="inline-flex size-10 items-center justify-center rounded-xl border border-rose-500/20 bg-rose-500/5 text-rose-400 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
               >
                 {isDeleting ? (
-                  <span className="size-4 animate-spin rounded-full border-2 border-rose-400/30 border-t-rose-400" />
+                  <span
+                    role="status"
+                    aria-label="Deleting competitor"
+                    className="size-4 animate-spin rounded-full border-2 border-rose-400/30 border-t-rose-400"
+                  />
                 ) : (
                   <Trash2 className="size-4" aria-hidden="true" />
                 )}

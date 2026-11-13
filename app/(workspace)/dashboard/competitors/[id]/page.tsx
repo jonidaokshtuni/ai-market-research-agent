@@ -7,8 +7,7 @@ import { db } from "@/db";
 import { competitors } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
-
-import CompetitorResearchPanel from "@/components/dashboard/competitors/competitor-research-panel";
+import { CompetitorResearchPanel } from "@/components/dashboard/competitors/competitor-research-panel";
 
 type CompetitorProfilePageProps = {
   params: Promise<{

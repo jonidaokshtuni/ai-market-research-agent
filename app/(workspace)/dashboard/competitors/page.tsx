@@ -1,10 +1,12 @@
+import { Suspense } from "react";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
+
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveWorkspace } from "@/lib/organizations/active-workspace";
 import CompetitorManager from "@/components/dashboard/competitors/competitor-manager";
 
-export default async function CompetitorsPage() {
-  // Ensure this page is rendered with request-time data.
+async function CompetitorsContent() {
   await connection();
 
   const user = await getCurrentUser();
@@ -13,9 +15,14 @@ export default async function CompetitorsPage() {
     redirect("/login");
   }
 
+  const activeWorkspace = await getActiveWorkspace(user.id);
+
+  if (!activeWorkspace) {
+    redirect("/");
+  }
+
   return (
     <main className="mx-auto w-full max-w-[1600px] space-y-8 p-4 sm:p-6 lg:p-8">
-      {/* Page heading */}
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-400">
@@ -35,8 +42,19 @@ export default async function CompetitorsPage() {
         </p>
       </header>
 
-      {/* Main competitor management interface */}
-      <CompetitorManager />
+      <CompetitorManager key={activeWorkspace.id} />
     </main>
+  );
+}
+
+export default function CompetitorsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-100 animate-pulse rounded-2xl bg-slate-900" />
+      }
+    >
+      <CompetitorsContent />
+    </Suspense>
   );
 }
