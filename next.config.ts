@@ -1,14 +1,10 @@
-
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
 
-  serverExternalPackages: [
-    "@huggingface/transformers",
-    "onnxruntime-node",
-  ],
+  serverExternalPackages: ["@huggingface/transformers", "onnxruntime-node"],
 
   outputFileTracingIncludes: {
     "/api/knowledge/embedding-test": [
@@ -16,6 +12,10 @@ const nextConfig: NextConfig = {
       "./node_modules/onnxruntime-common/**/*",
     ],
     "/api/chat": [
+      "./node_modules/onnxruntime-node/**/*",
+      "./node_modules/onnxruntime-common/**/*",
+    ],
+    "/api/knowledge/upload": [
       "./node_modules/onnxruntime-node/**/*",
       "./node_modules/onnxruntime-common/**/*",
     ],
