@@ -10,6 +10,17 @@ const nextConfig: NextConfig = {
     "onnxruntime-node",
   ],
 
+  outputFileTracingIncludes: {
+    "/api/knowledge/embedding-test": [
+      "./node_modules/onnxruntime-node/**/*",
+      "./node_modules/onnxruntime-common/**/*",
+    ],
+    "/api/chat": [
+      "./node_modules/onnxruntime-node/**/*",
+      "./node_modules/onnxruntime-common/**/*",
+    ],
+  },
+
   turbopack: {
     rules: {
       "*.css": {
