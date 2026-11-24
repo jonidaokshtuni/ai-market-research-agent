@@ -1,10 +1,14 @@
 
 import { google } from "@ai-sdk/google";
+import { groq } from "@ai-sdk/groq";
 
-// Primary model
+// Groq is used only by the market researcher during our initial test.
+export const marketResearchModel = groq("openai/gpt-oss-120b");
+
+// Existing Gemini models remain available to the other agents.
 export const researchModel = google("gemini-3.5-flash-lite");
 
-// Fallback model, used when the primary model is temporarily unavailable
+// Gemini fallback models for the market researcher.
 export const researchFallbackModel = google("gemini-3.1-flash-lite");
 
 export const AI_CONFIG = {

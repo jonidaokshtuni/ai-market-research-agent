@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -13,16 +14,10 @@ import {
 } from "lucide-react";
 
 import Modal from "@/components/ui/modal";
-
-type Invitation = {
-  id: string;
-  email: string;
-  role: "owner" | "admin" | "member";
-  expiresAt: string;
-  createdAt: string;
-  workspaceName: string;
-  inviterName: string | null;
-};
+import {
+  useWorkspaceInvitations,
+  type WorkspaceInvitation,
+} from "@/providers/workspace-invitations-provider";
 
 type InvitationPromptProps = {
   userEmail: string;
@@ -53,8 +48,13 @@ export default function InvitationPrompt({ userEmail }: InvitationPromptProps) {
 
   const invitationToken = searchParams.get("invite");
 
-  const [invitation, setInvitation] = useState<Invitation | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    invitations,
+    loading: invitationsLoading,
+    refreshInvitations,
+  } = useWorkspaceInvitations();
+
+  const [invitation, setInvitation] = useState<WorkspaceInvitation | null>(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,80 +68,69 @@ export default function InvitationPrompt({ userEmail }: InvitationPromptProps) {
     router.replace(query ? `${pathname}?${query}` : pathname);
   }, [invitationToken, pathname, router, searchParams]);
 
-  const loadInvitation = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // Select an invitation from the shared provider data.
+  // Token validation remains a separate request only when a token is present.
+  useEffect(() => {
+    if (invitationsLoading) return;
 
-    try {
-      const response = await fetch("/api/organizations/invitations", {
-        cache: "no-store",
-      });
+    let active = true;
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to load invitations.");
-      }
-
-      const pendingInvitations: Invitation[] = data.invitations || [];
-
+    async function selectInvitation() {
       if (invitationToken) {
-        const validationResponse = await fetch(
-          `/api/organizations/invitations/validate?token=${encodeURIComponent(
-            invitationToken
-          )}`,
-          { cache: "no-store" }
-        );
+        try {
+          const validationResponse = await fetch(
+            `/api/organizations/invitations/validate?token=${encodeURIComponent(
+              invitationToken
+            )}`,
+            { cache: "no-store" }
+          );
 
-        if (validationResponse.ok) {
-          const validationData = await validationResponse.json();
-          const validatedInvitation = validationData.invitation;
+          if (validationResponse.ok) {
+            const validationData = await validationResponse.json();
+            const validatedInvitation = validationData.invitation;
 
-          const emailMatches =
-            validatedInvitation.email.toLowerCase() === userEmail.toLowerCase();
+            const emailMatches =
+              validatedInvitation.email?.toLowerCase() ===
+              userEmail.toLowerCase();
 
-          if (emailMatches) {
-            const matchingInvitation = pendingInvitations.find(
-              (item) => item.id === validatedInvitation.id
-            );
+            if (emailMatches) {
+              const matchingInvitation = invitations.find(
+                (item) => item.id === validatedInvitation.id
+              );
 
-            if (
-              matchingInvitation &&
-              !sessionStorage.getItem(getDismissedKey(matchingInvitation.id))
-            ) {
-              setInvitation(matchingInvitation);
-              setLoading(false);
-              return;
+              if (
+                matchingInvitation &&
+                !sessionStorage.getItem(
+                  getDismissedKey(matchingInvitation.id)
+                )
+              ) {
+                if (active) {
+                  setInvitation(matchingInvitation);
+                }
+                return;
+              }
             }
           }
+        } catch (err) {
+          console.error("Unable to validate invitation token:", err);
         }
       }
 
-      const nextInvitation = pendingInvitations.find(
+      const nextInvitation = invitations.find(
         (item) => !sessionStorage.getItem(getDismissedKey(item.id))
       );
 
-      setInvitation(nextInvitation || null);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load your workspace invitations."
-      );
-    } finally {
-      setLoading(false);
+      if (active) {
+        setInvitation(nextInvitation || null);
+      }
     }
-  }, [invitationToken, userEmail]);
 
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadInvitation();
-    }, 0);
+    void selectInvitation();
 
     return () => {
-      window.clearTimeout(timeoutId);
+      active = false;
     };
-  }, [loadInvitation]);
+  }, [invitations, invitationsLoading, invitationToken, userEmail]);
 
   function handleClose() {
     if (invitation) {
@@ -178,7 +167,7 @@ export default function InvitationPrompt({ userEmail }: InvitationPromptProps) {
       setInvitation(null);
       clearInvitationQuery();
 
-      await loadInvitation();
+      await refreshInvitations();
       router.refresh();
     } catch (err) {
       setError(
@@ -191,7 +180,7 @@ export default function InvitationPrompt({ userEmail }: InvitationPromptProps) {
     }
   }
 
-  if (loading || !invitation) {
+  if (invitationsLoading || !invitation) {
     return null;
   }
 

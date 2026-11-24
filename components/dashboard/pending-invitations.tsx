@@ -1,6 +1,7 @@
+
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
@@ -16,15 +17,10 @@ import {
   X,
 } from "lucide-react";
 
-type Invitation = {
-  id: string;
-  email: string;
-  role: "owner" | "admin" | "member";
-  expiresAt: string;
-  createdAt: string;
-  workspaceName: string;
-  inviterName: string | null;
-};
+import {
+  useWorkspaceInvitations,
+  type WorkspaceInvitation,
+} from "@/providers/workspace-invitations-provider";
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -40,7 +36,7 @@ function formatDate(value: string) {
   }).format(date);
 }
 
-function RoleBadge({ role }: { role: Invitation["role"] }) {
+function RoleBadge({ role }: { role: WorkspaceInvitation["role"] }) {
   const styles = {
     owner: "border-amber-500/20 bg-amber-500/10 text-amber-300",
     admin: "border-indigo-500/20 bg-indigo-500/10 text-indigo-300",
@@ -62,63 +58,35 @@ function RoleBadge({ role }: { role: Invitation["role"] }) {
 export default function PendingInvitations() {
   const router = useRouter();
 
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    invitations,
+    loading,
+    error,
+    refreshInvitations,
+  } = useWorkspaceInvitations();
+
   const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const loadInvitations = useCallback(async (manual = false) => {
-    if (manual) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-
-    setError(null);
+  async function handleRefresh() {
+    setRefreshing(true);
+    setActionError(null);
 
     try {
-      const response = await fetch("/api/organizations/invitations", {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to load invitations.");
-      }
-
-      setInvitations(data.invitations || []);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Something went wrong while loading invitations."
-      );
+      await refreshInvitations();
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
-  }, []);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadInvitations();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [loadInvitations]);
+  }
 
   async function handleAction(
     invitationId: string,
     action: "accept" | "decline"
   ) {
     setProcessingId(invitationId);
-    setError(null);
+    setActionError(null);
     setSuccess(null);
 
     try {
@@ -136,19 +104,16 @@ export default function PendingInvitations() {
         throw new Error(data.error || `Unable to ${action} this invitation.`);
       }
 
-      setInvitations((current) =>
-        current.filter((invitation) => invitation.id !== invitationId)
-      );
-
       setSuccess(
         action === "accept"
           ? "You've successfully joined the workspace."
           : "The invitation has been declined."
       );
 
+      await refreshInvitations();
       router.refresh();
     } catch (err) {
-      setError(
+      setActionError(
         err instanceof Error
           ? err.message
           : "Something went wrong. Please try again."
@@ -157,6 +122,8 @@ export default function PendingInvitations() {
       setProcessingId(null);
     }
   }
+
+  const displayedError = actionError || error;
 
   return (
     <section className="space-y-5">
@@ -172,7 +139,7 @@ export default function PendingInvitations() {
 
         <button
           type="button"
-          onClick={() => void loadInvitations(true)}
+          onClick={() => void handleRefresh()}
           disabled={loading || refreshing}
           className="inline-flex w-fit items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -181,12 +148,12 @@ export default function PendingInvitations() {
         </button>
       </div>
 
-      {error && (
+      {displayedError && (
         <div
           role="alert"
           className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-300"
         >
-          {error}
+          {displayedError}
         </div>
       )}
 

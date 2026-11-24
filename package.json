@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.114",
+    "@ai-sdk/groq": "^4.0.86",
     "@ai-sdk/react": "^4.0.170",
     "@huggingface/transformers": "^4.3.2",
     "@neondatabase/serverless": "^1.2.0",

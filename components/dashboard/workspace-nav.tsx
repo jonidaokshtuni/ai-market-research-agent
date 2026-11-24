@@ -1,6 +1,6 @@
+
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -14,6 +14,7 @@ import {
   Sparkles,
   ArrowUpRight,
 } from "lucide-react";
+import { useWorkspaceInvitations } from "@/providers/workspace-invitations-provider";
 
 type WorkspaceNavProps = {
   canManageMembers: boolean;
@@ -27,37 +28,8 @@ export default function WorkspaceNav({
   const pathname = usePathname();
   const isMobile = variant === "mobile";
 
-  const [pendingInvitationCount, setPendingInvitationCount] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function loadPendingInvitations() {
-      try {
-        const response = await fetch("/api/organizations/invitations", {
-          method: "GET",
-          cache: "no-store",
-          signal: controller.signal,
-        });
-
-        if (!response.ok) return;
-
-        const data = await response.json();
-
-        if (Array.isArray(data.invitations)) {
-          setPendingInvitationCount(data.invitations.length);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name !== "AbortError") {
-          console.error("Unable to load pending invitations:", error);
-        }
-      }
-    }
-
-    loadPendingInvitations();
-
-    return () => controller.abort();
-  }, [pathname]);
+  const { invitations } = useWorkspaceInvitations();
+  const pendingInvitationCount = invitations.length;
 
   const navigation = [
     { name: "Overview", href: "/", icon: LayoutDashboard },
