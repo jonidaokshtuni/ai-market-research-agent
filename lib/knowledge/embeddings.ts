@@ -1,9 +1,14 @@
 
 import "server-only";
 
-import { pipeline } from "@huggingface/transformers";
+import { env, pipeline } from "@huggingface/transformers";
 
 const MODEL_ID = "Xenova/multilingual-e5-small";
+
+// Vercel's application directory is not writable.
+// Use its temporary filesystem for downloaded model files.
+env.cacheDir =
+  process.env.TRANSFORMERS_CACHE || "/tmp/transformers-cache";
 
 type EmbeddingPipeline = Awaited<
   ReturnType<typeof pipeline<"feature-extraction">>
@@ -21,7 +26,6 @@ async function getEmbeddingPipeline(): Promise<EmbeddingPipeline> {
   try {
     return await pipelinePromise;
   } catch (error) {
-    // Allow a later request to retry if model loading fails.
     pipelinePromise = null;
     throw error;
   }
@@ -48,7 +52,7 @@ async function generateEmbedding(
 
   if (embedding.length !== 384) {
     throw new Error(
-      `Expected a 384-dimensional embedding, received ${embedding.length}.`
+      `Expected 384 embedding dimensions, received ${embedding.length}.`
     );
   }
 
