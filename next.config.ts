@@ -1,9 +1,15 @@
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+
+  serverExternalPackages: [
+    "@huggingface/transformers",
+    "onnxruntime-node",
+  ],
+
   turbopack: {
     rules: {
       "*.css": {
