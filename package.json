@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
@@ -19,6 +19,7 @@
     "mammoth": "^1.13.0",
     "next": "16.4.5",
     "nodemailer": "^10.5.0",
+    "onnxruntime-node": "^1.30.0",
     "pdf-parse": "^2.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
