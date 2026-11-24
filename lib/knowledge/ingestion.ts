@@ -1,7 +1,6 @@
 
 import "server-only";
 
-import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 
 const MAX_FILE_SIZE_BYTES = 4 * 1024 * 1024;
@@ -122,7 +121,23 @@ function validateExtractedText(text: string): string {
 
   return normalized;
 }
+async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  // Load the worker first to provide the required CanvasFactory.
+  const { CanvasFactory } = await import("pdf-parse/worker");
+  const { PDFParse } = await import("pdf-parse");
 
+  const parser = new PDFParse({
+    data: bytes,
+    CanvasFactory,
+  });
+
+  try {
+    const result = await parser.getText();
+    return result.text.trim();
+  } finally {
+    await parser.destroy();
+  }
+}
 export async function extractDocumentText(
   file: File
 ): Promise<ExtractedDocument> {
@@ -154,14 +169,8 @@ export async function extractDocumentText(
       );
     }
 
-    const parser = new PDFParse({ data: bytes });
-
-    try {
-      const result = await parser.getText();
-      text = result.text;
-    } finally {
-      await parser.destroy();
-    }
+    // PDF parser is loaded only when a PDF is uploaded.
+    text = await extractPdfText(bytes);
 
     mimeType = "application/pdf";
   } else if (extension === "docx") {
