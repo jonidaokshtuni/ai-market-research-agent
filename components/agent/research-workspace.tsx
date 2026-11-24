@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import KnowledgeBase from "@/components/agent/knowledge-base";
 
 type Source = {
   title?: string;
@@ -68,7 +69,7 @@ export default function ResearchWorkspace({
       workspaceRole === "owner" ||
       workspaceRole === "admin" ||
       session.userId === userId,
-    [workspaceRole, userId]
+    [workspaceRole, userId],
   );
 
   useEffect(() => {
@@ -117,7 +118,7 @@ export default function ResearchWorkspace({
         setError(
           err instanceof Error
             ? err.message
-            : "Failed to load research sessions."
+            : "Failed to load research sessions.",
         );
       } finally {
         if (!controller.signal.aborted) {
@@ -152,7 +153,7 @@ export default function ResearchWorkspace({
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Could not create a new research session."
+          data.error || "Could not create a new research session.",
         );
       }
 
@@ -163,7 +164,7 @@ export default function ResearchWorkspace({
       setMessages(newSession.messages ?? []);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Could not create session."
+        err instanceof Error ? err.message : "Could not create session.",
       );
     } finally {
       setCreatingSession(false);
@@ -191,7 +192,7 @@ export default function ResearchWorkspace({
         `/api/sessions?id=${encodeURIComponent(session.id)}`,
         {
           method: "DELETE",
-        }
+        },
       );
 
       const data = await response.json().catch(() => ({}));
@@ -215,7 +216,7 @@ export default function ResearchWorkspace({
       }
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Could not delete session."
+        err instanceof Error ? err.message : "Could not delete session.",
       );
     } finally {
       setDeletingId("");
@@ -255,7 +256,7 @@ export default function ResearchWorkspace({
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Research could not be completed. Please try again."
+          data.error || "Research could not be completed. Please try again.",
         );
       }
 
@@ -280,12 +281,12 @@ export default function ResearchWorkspace({
                     : session.title,
                 messages: [...updatedMessages, assistantMessage],
               }
-            : session
-        )
+            : session,
+        ),
       );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Research could not be completed."
+        err instanceof Error ? err.message : "Research could not be completed.",
       );
     } finally {
       setLoading(false);
@@ -322,9 +323,11 @@ export default function ResearchWorkspace({
           {creatingSession ? "Creating..." : "+ New research"}
         </button>
       </div>
+      {/* Knowledge Base */}
+      <KnowledgeBase userId={userId} workspaceRole={workspaceRole} />
 
       {/* Main workspace */}
-      <div className="grid min-h-[650px] gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div className="grid min-h-162.5 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
         {/* Research history */}
         <aside className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
           <div className="mb-4 flex items-center justify-between">
@@ -430,7 +433,7 @@ export default function ResearchWorkspace({
           {/* Messages */}
           <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
             {messages.length === 0 && (
-              <div className="flex min-h-[400px] flex-col items-center justify-center text-center">
+              <div className="flex min-h-100 flex-col items-center justify-center text-center">
                 <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-indigo-500/30 bg-indigo-500/10 text-2xl text-indigo-300">
                   ✦
                 </div>
@@ -664,7 +667,7 @@ export default function ResearchWorkspace({
                 placeholder="Ask your research question..."
                 rows={2}
                 disabled={!activeId || loadingSessions || loading}
-                className="max-h-36 min-h-[52px] flex-1 resize-y rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                className="max-h-36 min-h-13 flex-1 resize-y rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
 
               <button

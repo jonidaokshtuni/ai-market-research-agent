@@ -2,7 +2,12 @@
 import { generateText, Output, tool, stepCountIs } from "ai";
 import { z } from "zod";
 
-import { researchModel, AI_CONFIG } from "../models";
+import {
+  researchModel,
+  researchFallbackModel,
+  AI_CONFIG,
+} from "../models";
+
 import { searchInternet } from "@/lib/tools/search";
 import { extractWebsite } from "@/lib/tools/extract";
 
@@ -12,7 +17,45 @@ const MarketResearchResultSchema = AgentResultSchema.extend({
   agentName: z.literal("market-researcher"),
 });
 
-export type MarketResearchOutput = z.infer<typeof MarketResearchResultSchema>;
+export type MarketResearchOutput = z.infer<
+  typeof MarketResearchResultSchema
+>;
+
+type ResearchModel = typeof researchModel;
+
+function isTemporaryModelError(error: unknown): boolean {
+  const visited = new Set<unknown>();
+
+  function inspect(value: unknown): boolean {
+    if (!value || typeof value !== "object" || visited.has(value)) {
+      return false;
+    }
+
+    visited.add(value);
+
+    const errorObject = value as Record<string, unknown>;
+
+    const statusCode = Number(
+      errorObject.statusCode ?? errorObject.status
+    );
+
+    if ([500, 502, 503, 504].includes(statusCode)) {
+      return true;
+    }
+
+    if (errorObject.isRetryable === true) {
+      return true;
+    }
+
+    return (
+      inspect(errorObject.lastError) ||
+      inspect(errorObject.cause) ||
+      inspect(errorObject.errors)
+    );
+  }
+
+  return inspect(error);
+}
 
 export async function runMarketResearcher({
   task,
@@ -119,17 +162,37 @@ Return structured findings following the provided schema.
 Provide actionable insights rather than generic statements.
 `;
 
-  const response = await generateText({
-    model: researchModel,
-    system: systemPrompt,
-    prompt: task,
-    tools: researchTools,
-    stopWhen: stepCountIs(AI_CONFIG.maxToolSteps),
-    maxRetries: AI_CONFIG.maxRetries,
-    output: Output.object({
-      schema: MarketResearchResultSchema,
-    }),
-  });
+  const generateResearch = (model: ResearchModel) =>
+    generateText({
+      model,
+      system: systemPrompt,
+      prompt: task,
+      tools: researchTools,
+      stopWhen: stepCountIs(AI_CONFIG.maxToolSteps),
+      maxRetries: AI_CONFIG.maxRetries,
+      output: Output.object({
+        schema: MarketResearchResultSchema,
+      }),
+    });
+
+  let response;
+
+  try {
+    console.info("[Research] Trying primary model.");
+    response = await generateResearch(researchModel);
+  } catch (error) {
+    if (!isTemporaryModelError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      "[Research] Primary model temporarily unavailable. Trying fallback model."
+    );
+
+    response = await generateResearch(researchFallbackModel);
+
+    console.info("[Research] Fallback model completed successfully.");
+  }
 
   return {
     result: response.output,
