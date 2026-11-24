@@ -85,6 +85,13 @@
       "when": 1794496549532,
       "tag": "0011_wooden_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795174499202,
+      "tag": "0012_bored_starjammers",
+      "breakpoints": true
     }
   ]
 }

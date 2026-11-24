@@ -8,6 +8,7 @@ import {
   integer,
   uniqueIndex,
   boolean,
+  vector,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -427,5 +428,97 @@ export const organizationJoinRequests = pgTable(
     uniqueIndex("organization_join_requests_pending_unique")
       .on(table.organizationId, table.userId)
       .where(sql`${table.status} = 'pending'`),
+  ]
+);
+
+// Knowledge base documents
+export const knowledgeDocuments = pgTable(
+  "knowledge_documents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    organizationId: uuid("organization_id").references(
+      () => organizations.id,
+      { onDelete: "cascade" }
+    ),
+
+    uploadedBy: uuid("uploaded_by")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+
+    name: text("name").notNull(),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+
+    sourceType: text("source_type")
+      .$type<"upload" | "url" | "research">()
+      .default("upload")
+      .notNull(),
+
+    sourceUrl: text("source_url"),
+
+    status: text("status")
+      .$type<"pending" | "processing" | "completed" | "failed">()
+      .default("pending")
+      .notNull(),
+
+    error: text("error"),
+
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("knowledge_documents_organization_idx").on(
+      table.organizationId
+    ),
+    index("knowledge_documents_uploaded_by_idx").on(table.uploadedBy),
+    index("knowledge_documents_status_idx").on(table.status),
+  ]
+);
+
+// Knowledge base chunks and embeddings
+export const knowledgeChunks = pgTable(
+  "knowledge_chunks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    documentId: uuid("document_id")
+      .references(() => knowledgeDocuments.id, {
+        onDelete: "cascade",
+      })
+      .notNull(),
+
+    organizationId: uuid("organization_id").references(
+      () => organizations.id,
+      { onDelete: "cascade" }
+    ),
+
+    chunkIndex: integer("chunk_index").notNull(),
+
+    content: text("content").notNull(),
+
+    embedding: vector("embedding", {
+      dimensions: 384,
+    }).notNull(),
+
+    metadata: jsonb("metadata").$type<{
+      pageNumber?: number;
+      section?: string;
+      sourceUrl?: string;
+    }>(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_chunks_document_index_unique").on(
+      table.documentId,
+      table.chunkIndex
+    ),
+    index("knowledge_chunks_document_idx").on(table.documentId),
+    index("knowledge_chunks_organization_idx").on(
+      table.organizationId
+    ),
   ]
 );

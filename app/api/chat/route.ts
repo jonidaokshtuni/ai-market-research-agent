@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-
+import { retrieveKnowledge } from "@/lib/knowledge/retrieval";
 import { db } from "@/db";
 import {
   messages as messagesTable,
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     if (!workspace) {
       return Response.json(
         { error: "No active workspace found." },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
           error: "Invalid request.",
           details: validation.error.flatten(),
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -58,15 +58,15 @@ export async function POST(req: Request) {
       .where(
         and(
           eq(sessionsTable.id, sessionId),
-          eq(sessionsTable.organizationId, workspace.id)
-        )
+          eq(sessionsTable.organizationId, workspace.id),
+        ),
       )
       .limit(1);
 
     if (!session) {
       return Response.json(
         { error: "Research session not found." },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -96,8 +96,8 @@ export async function POST(req: Request) {
         .where(
           and(
             eq(sessionsTable.id, sessionId),
-            eq(sessionsTable.organizationId, workspace.id)
-          )
+            eq(sessionsTable.organizationId, workspace.id),
+          ),
         );
     }
 
@@ -128,10 +128,24 @@ export async function POST(req: Request) {
       throw new Error("Invalid conversation history.");
     }
 
-    // Execute the research agent.
+    // Retrieve relevant documents from the user's personal knowledge
+    // base and the currently authorized workspace.
+    const knowledgeContext = await retrieveKnowledge({
+      query: message,
+      userId: user.id,
+      organizationId: workspace.id,
+      limit: 5,
+    });
+
+    // Execute the research agent with retrieved knowledge.
     const result = await runResearchAgent({
       messages: conversationHistory,
       mode,
+      knowledgeContext: knowledgeContext.map((chunk) => ({
+        documentName: chunk.documentName,
+        content: chunk.content,
+        chunkIndex: chunk.chunkIndex,
+      })),
     });
 
     // Persist the assistant response.
@@ -159,7 +173,7 @@ export async function POST(req: Request) {
       {
         error: "Research could not be completed. Please try again.",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
